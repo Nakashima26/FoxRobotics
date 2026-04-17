@@ -1,0 +1,4 @@
+(sym_lib_table
+  (lib (name "Snapeda")(type "KiCad")(uri "${KIPRJMOD}/Snapeda.kicad_sym")(options "")(descr ""))
+  (lib (name "EasyEDA")(type "KiCad")(uri "${KIPRJMOD}/EasyEDA.kicad_sym")(options "")(descr ""))
+)
