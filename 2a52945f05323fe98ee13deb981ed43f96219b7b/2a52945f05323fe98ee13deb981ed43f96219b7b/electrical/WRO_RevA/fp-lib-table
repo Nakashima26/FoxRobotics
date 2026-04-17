@@ -2,4 +2,5 @@
   (version 7)
   (lib (name "EasyEDA")(type "KiCad")(uri "${KIPRJMOD}/EasyEDA.pretty")(options "")(descr ""))
   (lib (name "Snapeda")(type "KiCad")(uri "${KIPRJMOD}/Snapeda.pretty")(options "")(descr ""))
+  (lib (name "Libreria_mia")(type "KiCad")(uri "${KIPRJMOD}/Libreria_mia.pretty")(options "")(descr ""))
 )

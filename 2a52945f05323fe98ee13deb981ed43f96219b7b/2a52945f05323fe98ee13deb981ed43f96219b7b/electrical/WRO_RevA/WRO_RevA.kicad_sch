@@ -6306,7 +6306,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Capacitor_THT:CP_Radial_D5.0mm_P2.00mm"
 			(at 134.3152 73.66 0)
 			(effects
 				(font
@@ -6837,7 +6837,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "484bf93b-3e16-4898-a575-28bda4396998")
-		(property "Reference" "J1"
+		(property "Reference" "J2"
 			(at 193.04 109.2199 0)
 			(effects
 				(font
@@ -6909,7 +6909,7 @@
 		(instances
 			(project ""
 				(path "/737eb7c9-287d-4e9e-a07f-ac9efe008363"
-					(reference "J1")
+					(reference "J2")
 					(unit 1)
 				)
 			)
@@ -7465,7 +7465,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "72bc58e3-f902-447a-b8fd-9d6896875a53")
-		(property "Reference" "J3"
+		(property "Reference" "J5"
 			(at 237.49 110.49 0)
 			(effects
 				(font
@@ -7517,7 +7517,7 @@
 		(instances
 			(project "WRO_RevA"
 				(path "/737eb7c9-287d-4e9e-a07f-ac9efe008363"
-					(reference "J3")
+					(reference "J5")
 					(unit 1)
 				)
 			)
@@ -8220,7 +8220,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Mini560:Mini560"
+		(property "Footprint" "Libreria_mia:Mini560"
 			(at 118.11 66.04 0)
 			(effects
 				(font
@@ -8296,7 +8296,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Connector_PinSocket_2.54mm:PinSocket_1x04_P2.54mm_Vertical"
 			(at 254 81.28 0)
 			(effects
 				(font
@@ -8800,7 +8800,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Connector_PinSocket_2.54mm:PinSocket_1x04_P2.54mm_Vertical"
 			(at 207.01 58.42 0)
 			(effects
 				(font
@@ -9347,7 +9347,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Connector_PinSocket_2.54mm:PinSocket_1x04_P2.54mm_Vertical"
 			(at 255.27 58.42 0)
 			(effects
 				(font
@@ -9423,7 +9423,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Connector_PinSocket_2.54mm:PinSocket_1x04_P2.54mm_Vertical"
 			(at 207.01 81.28 0)
 			(effects
 				(font
@@ -10022,7 +10022,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "fc4e5bf5-4e4b-4b65-836d-9b9bf476c87b")
-		(property "Reference" "J2"
+		(property "Reference" "J3"
 			(at 223.52 105.4099 0)
 			(effects
 				(font
@@ -10040,7 +10040,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical"
 			(at 222.25 106.68 0)
 			(effects
 				(font
@@ -10085,7 +10085,7 @@
 		(instances
 			(project ""
 				(path "/737eb7c9-287d-4e9e-a07f-ac9efe008363"
-					(reference "J2")
+					(reference "J3")
 					(unit 1)
 				)
 			)
