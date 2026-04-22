@@ -1,4 +1,4 @@
-26842917672816056
+26850024313222565
 815
 MODULE_815
 
@@ -60227,6 +60227,13 @@ One digit LED 7 segment SA39-11 SC39-11 SA39-12 SC39-12
 0
 10
 10
+ESP32-DEVKITC-32D
+ESP32-DEVKITC-32D
+
+
+0
+38
+38
 EasyEDA
 SW-TH_HX_3P-P3.00-HX-SS12F15G5
 
@@ -60234,6 +60241,13 @@ SW-TH_HX_3P-P3.00-HX-SS12F15G5
 0
 5
 3
+Esp38Pin
+Esp38Pin
+
+
+0
+38
+38
 Ferrite_THT
 LairdTech_28C0236-0JW-10
 Ferrite, vertical, LairdTech 28C0236-0JW-10, https://assets.lairdtech.com/home/brandworld/files/28C0236-0JW-10.pdf, JW Miller core https://www.bourns.com/products/magnetic-products/j.w.-miller-through-hole-ferrite-beads-emi-filters
@@ -69915,6 +69929,20 @@ Mini560
 0
 8
 4
+LogoFoxR_2
+LogoFoxR_2
+
+
+0
+0
+0
+LogoFoxR_2_13mm
+LogoFoxR_2_13mm
+
+
+0
+0
+0
 MP1584EN_Module
 SRT_MPT1584EN_Module
 
