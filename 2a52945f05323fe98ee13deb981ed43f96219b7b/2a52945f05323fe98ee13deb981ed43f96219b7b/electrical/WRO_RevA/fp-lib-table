@@ -7,4 +7,5 @@
   (lib (name "LogoFoxR_2_13mm")(type "KiCad")(uri "${KIPRJMOD}/LogoFoxR_2_13mm.pretty")(options "")(descr ""))
   (lib (name "Esp38Pin")(type "KiCad")(uri "${KIPRJMOD}/Esp38Pin.pretty")(options "")(descr ""))
   (lib (name "ESP32-DEVKITC-32D")(type "KiCad")(uri "${KIPRJMOD}/ESP32-DEVKITC-32D.pretty")(options "")(descr ""))
+  (lib (name "usini_sensors")(type "KiCad")(uri "${KIPRJMOD}/usini_sensors.pretty")(options "")(descr ""))
 )
