@@ -5,4 +5,5 @@
   (lib (name "Libreria_mia")(type "KiCad")(uri "${KIPRJMOD}/Libreria_mia.kicad_sym")(options "")(descr ""))
   (lib (name "Esp38Pin")(type "KiCad")(uri "${KIPRJMOD}/Esp38Pin.kicad_sym")(options "")(descr ""))
   (lib (name "ESP32-DEVKITC-32D")(type "KiCad")(uri "${KIPRJMOD}/ESP32-DEVKITC-32D.kicad_sym")(options "")(descr ""))
+  (lib (name "usini_sensors")(type "KiCad")(uri "${KIPRJMOD}/usini_sensors.kicad_sym")(options "")(descr ""))
 )
