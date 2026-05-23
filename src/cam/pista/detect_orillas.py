@@ -1,3 +1,5 @@
+import os
+
 import cv2
 import numpy as np
 
@@ -9,9 +11,17 @@ WOOD_UPPER = np.array([35, 180, 255])
 
 
 def open_camera(cam_index: int):
-    cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
-    if not cap.isOpened():
-        cap = cv2.VideoCapture(cam_index)
+    if os.name == "nt":
+        cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(cam_index)
+    else:
+        pipeline = "libcamerasrc ! video/x-raw, width=640, height=480, framerate=30/1 ! videoconvert ! appsink drop=true sync=false"
+        cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(cam_index)
+
     if not cap.isOpened():
         raise RuntimeError("No se pudo abrir la camara.")
     return cap
