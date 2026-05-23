@@ -74,7 +74,7 @@ def detect_turn_direction(frame, previous_left=None, previous_right=None, top_ra
         "mask": mask,
         "left_ratio": left_ratio,
         "right_ratio": right_ratio,
-        "top_limit": top_limit,
+        "top_ratio": top_ratio,
         "turn_text": turn_text,
     }
     return debug
@@ -82,14 +82,15 @@ def detect_turn_direction(frame, previous_left=None, previous_right=None, top_ra
 
 def draw_debug(frame, debug):
     height, width = frame.shape[:2]
-    top_limit = debug["top_limit"]
+    top_limit = max(1, int(height * debug["top_ratio"]))
     mid = width // 2
 
     cv2.rectangle(frame, (0, 0), (mid - 1, top_limit - 1), (0, 255, 0), 1)
     cv2.rectangle(frame, (mid, 0), (width - 1, top_limit - 1), (0, 255, 255), 1)
 
     overlay = frame.copy()
-    colored_mask = cv2.cvtColor(debug["mask"], cv2.COLOR_GRAY2BGR)
+    resized_mask = cv2.resize(debug["mask"], (width, height), interpolation=cv2.INTER_NEAREST)
+    colored_mask = cv2.cvtColor(resized_mask, cv2.COLOR_GRAY2BGR)
     overlay[:top_limit, :] = cv2.addWeighted(frame[:top_limit, :], 0.65, colored_mask, 0.35, 0)
     frame[:top_limit, :] = overlay[:top_limit, :]
 
