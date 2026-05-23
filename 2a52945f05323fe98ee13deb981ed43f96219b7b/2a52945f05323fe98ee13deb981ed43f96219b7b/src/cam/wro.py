@@ -1,7 +1,7 @@
 import cv2
 from control import CarController
 import time
-def run_car(cam_index=0):
+def run_car(cam_index=1):
     car = CarController(cam_index)
     time.sleep(2)
     frame_skip = 2  # Procesa cada 2 frames
