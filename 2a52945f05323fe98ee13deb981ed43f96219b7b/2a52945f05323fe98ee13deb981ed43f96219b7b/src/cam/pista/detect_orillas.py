@@ -9,8 +9,11 @@ import numpy as np
 # Ajustable segun la luz real de la pista.
 WOOD_LOWER = np.array([5, 25, 40])
 WOOD_UPPER = np.array([35, 180, 255])
-PREVIEW_WIDTH = 320
-PREVIEW_HEIGHT = 240
+ANALYSIS_WIDTH = 160
+ANALYSIS_HEIGHT = 120
+PREVIEW_WIDTH = 256
+PREVIEW_HEIGHT = 144
+PROCESS_EVERY_N = 2
 
 
 def open_camera(cam_index: int):
@@ -44,8 +47,7 @@ def detect_turn_direction(frame, previous_left=None, previous_right=None, top_ra
 
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv, WOOD_LOWER, WOOD_UPPER)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
     mid = width // 2
     left_mask = mask[:, :mid]
@@ -119,9 +121,11 @@ def run(cam_index=1):
     last_fps_time = time.perf_counter()
     fps = 0.0
     frame_count = 0
+    loop_index = 0
+    last_debug = None
 
     while True:
-        for _ in range(2):
+        for _ in range(PROCESS_EVERY_N - 1):
             if not cap.grab():
                 break
 
@@ -138,11 +142,16 @@ def run(cam_index=1):
             frame_count = 0
             last_fps_time = now
 
-        preview = cv2.resize(frame, (PREVIEW_WIDTH, PREVIEW_HEIGHT), interpolation=cv2.INTER_AREA)
+        analysis = cv2.resize(frame, (ANALYSIS_WIDTH, ANALYSIS_HEIGHT), interpolation=cv2.INTER_AREA)
+        preview = cv2.resize(analysis, (PREVIEW_WIDTH, PREVIEW_HEIGHT), interpolation=cv2.INTER_AREA)
 
-        debug = detect_turn_direction(preview, previous_left, previous_right)
-        previous_left = debug["left_ratio"]
-        previous_right = debug["right_ratio"]
+        if loop_index % PROCESS_EVERY_N == 0 or last_debug is None:
+            last_debug = detect_turn_direction(analysis, previous_left, previous_right)
+            previous_left = last_debug["left_ratio"]
+            previous_right = last_debug["right_ratio"]
+
+        debug = last_debug
+        loop_index += 1
 
         draw_debug(preview, debug)
         cv2.putText(
