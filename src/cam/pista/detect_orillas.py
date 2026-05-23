@@ -113,13 +113,22 @@ def detect_turn_direction(frame, previous_left=None, previous_right=None, top_ra
     top_limit = max(1, int(height * top_ratio))
     roi = frame[:top_limit, :]
 
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, WOOD_LOWER, WOOD_UPPER)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-
     segment_bounds = build_segment_bounds(width, ROI_SEGMENTS)
-    left_mask = mask[:, segment_bounds[0][0] : segment_bounds[0][1] + 1]
-    right_mask = mask[:, segment_bounds[-1][0] : segment_bounds[-1][1] + 1]
+
+    left_left, left_right = segment_bounds[0]
+    right_left, right_right = segment_bounds[-1]
+
+    left_roi = roi[:, left_left : left_right + 1]
+    right_roi = roi[:, right_left : right_right + 1]
+
+    left_hsv = cv2.cvtColor(left_roi, cv2.COLOR_BGR2HSV)
+    right_hsv = cv2.cvtColor(right_roi, cv2.COLOR_BGR2HSV)
+
+    left_mask = cv2.inRange(left_hsv, WOOD_LOWER, WOOD_UPPER)
+    right_mask = cv2.inRange(right_hsv, WOOD_LOWER, WOOD_UPPER)
+
+    left_mask = cv2.morphologyEx(left_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    right_mask = cv2.morphologyEx(right_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
     left_count = int(cv2.countNonZero(left_mask))
     right_count = int(cv2.countNonZero(right_mask))
@@ -139,7 +148,10 @@ def detect_turn_direction(frame, previous_left=None, previous_right=None, top_ra
         print(turn_text, flush=True)
 
     debug = {
-        "mask": mask,
+        "mask": None,
+        "left_mask": left_mask,
+        "right_mask": right_mask,
+        "edge_bounds": ((left_left, left_right), (right_left, right_right)),
         "left_ratio": left_ratio,
         "right_ratio": right_ratio,
         "top_ratio": top_ratio,
@@ -153,6 +165,11 @@ def draw_debug(frame, debug, fps=None):
     height, width = frame.shape[:2]
     top_limit = max(1, int(height * debug["top_ratio"]))
     segment_bounds = build_segment_bounds(width, debug.get("segment_count", ROI_SEGMENTS))
+    edge_mask = np.zeros((top_limit, width), dtype=np.uint8)
+
+    left_bounds, right_bounds = debug["edge_bounds"]
+    edge_mask[:, left_bounds[0] : left_bounds[1] + 1] = debug["left_mask"]
+    edge_mask[:, right_bounds[0] : right_bounds[1] + 1] = debug["right_mask"]
 
     for index, (left, right) in enumerate(segment_bounds):
         if index == 0:
@@ -167,7 +184,7 @@ def draw_debug(frame, debug, fps=None):
         cv2.rectangle(frame, (left, 0), (right, top_limit - 1), color, thickness)
 
     overlay = frame.copy()
-    resized_mask = cv2.resize(debug["mask"], (width, height), interpolation=cv2.INTER_NEAREST)
+    resized_mask = cv2.resize(edge_mask, (width, height), interpolation=cv2.INTER_NEAREST)
     colored_mask = cv2.cvtColor(resized_mask, cv2.COLOR_GRAY2BGR)
     overlay[:top_limit, :] = cv2.addWeighted(
         frame[:top_limit, :],
