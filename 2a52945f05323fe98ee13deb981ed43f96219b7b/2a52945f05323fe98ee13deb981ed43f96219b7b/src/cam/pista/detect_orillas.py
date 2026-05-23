@@ -192,7 +192,6 @@ def run(cam_index=1):
             last_fps_time = now
 
         analysis = cv2.resize(frame, (ANALYSIS_WIDTH, ANALYSIS_HEIGHT), interpolation=cv2.INTER_AREA)
-        preview = cv2.resize(analysis, (PREVIEW_WIDTH, PREVIEW_HEIGHT), interpolation=cv2.INTER_AREA)
 
         if loop_index % PROCESS_EVERY_N == 0 or last_debug is None:
             last_debug = detect_turn_direction(analysis, previous_left, previous_right)
@@ -202,9 +201,9 @@ def run(cam_index=1):
         debug = last_debug
         loop_index += 1
 
-        draw_debug(preview, debug)
+        draw_debug(analysis, debug)
         cv2.putText(
-            preview,
+            analysis,
             f"FPS: {fps:.1f}",
             (10, 20),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -212,7 +211,7 @@ def run(cam_index=1):
             (0, 255, 0),
             2,
         )
-        cv2.imshow(WINDOW_NAME, preview)
+        cv2.imshow(WINDOW_NAME, analysis)
 
         if cv2.waitKey(1) & 0xFF == 27:
             break
