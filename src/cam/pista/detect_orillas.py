@@ -18,8 +18,6 @@ WINDOW_WIDTH = 320
 WINDOW_HEIGHT = 240
 PROCESS_EVERY_N = 3
 WINDOW_NAME = "Pista"
-TOP_FIFTHS = 5
-EDGE_FIFTH_INDEXES = (0, 4)
 
 
 cv2.setUseOptimized(True)
@@ -94,9 +92,9 @@ def detect_turn_direction(frame, previous_left=None, previous_right=None, top_ra
     mask = cv2.inRange(hsv, WOOD_LOWER, WOOD_UPPER)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
-    fifth_width = max(1, width // TOP_FIFTHS)
-    left_mask = mask[:, :fifth_width]
-    right_mask = mask[:, fifth_width * (TOP_FIFTHS - 1):]
+    mid = width // 2
+    left_mask = mask[:, :mid]
+    right_mask = mask[:, mid:]
 
     left_count = int(cv2.countNonZero(left_mask))
     right_count = int(cv2.countNonZero(right_mask))
@@ -120,23 +118,18 @@ def detect_turn_direction(frame, previous_left=None, previous_right=None, top_ra
         "left_ratio": left_ratio,
         "right_ratio": right_ratio,
         "top_ratio": top_ratio,
-        "fifth_width": fifth_width,
         "turn_text": turn_text,
     }
     return debug
 
 
-def draw_debug(frame, debug, font_scale=0.6, thickness=2):
+def draw_debug(frame, debug):
     height, width = frame.shape[:2]
     top_limit = max(1, int(height * debug["top_ratio"]))
-    fifth_width = max(1, debug["fifth_width"])
+    mid = width // 2
 
-    for index in range(1, TOP_FIFTHS):
-        x = min(width - 1, index * fifth_width)
-        cv2.line(frame, (x, 0), (x, top_limit - 1), (255, 255, 0), 1)
-
-    cv2.rectangle(frame, (0, 0), (fifth_width - 1, top_limit - 1), (0, 255, 0), 1)
-    cv2.rectangle(frame, (width - fifth_width, 0), (width - 1, top_limit - 1), (0, 255, 255), 1)
+    cv2.rectangle(frame, (0, 0), (mid - 1, top_limit - 1), (0, 255, 0), 1)
+    cv2.rectangle(frame, (mid, 0), (width - 1, top_limit - 1), (0, 255, 255), 1)
 
     overlay = frame.copy()
     resized_mask = cv2.resize(debug["mask"], (width, height), interpolation=cv2.INTER_NEAREST)
@@ -155,9 +148,9 @@ def draw_debug(frame, debug, font_scale=0.6, thickness=2):
         f"L={debug['left_ratio']:.3f} R={debug['right_ratio']:.3f}",
         (10, top_limit + 25),
         cv2.FONT_HERSHEY_SIMPLEX,
-        font_scale,
+        0.7,
         (255, 255, 255),
-        thickness,
+        2,
     )
     if debug["turn_text"]:
         cv2.putText(
@@ -165,30 +158,10 @@ def draw_debug(frame, debug, font_scale=0.6, thickness=2):
             debug["turn_text"],
             (10, top_limit + 55),
             cv2.FONT_HERSHEY_SIMPLEX,
-            font_scale,
+            0.8,
             (0, 0, 255),
-            thickness,
+            2,
         )
-
-
-def get_window_scale(default_width=PREVIEW_WIDTH, default_height=PREVIEW_HEIGHT):
-    try:
-        _, _, win_width, win_height = cv2.getWindowImageRect(WINDOW_NAME)
-        if win_width <= 0 or win_height <= 0:
-            return 1.0
-        return min(win_width / default_width, win_height / default_height)
-    except cv2.error:
-        return 1.0
-
-
-def get_window_size(default_width=PREVIEW_WIDTH, default_height=PREVIEW_HEIGHT):
-    try:
-        _, _, win_width, win_height = cv2.getWindowImageRect(WINDOW_NAME)
-        if win_width <= 0 or win_height <= 0:
-            return default_width, default_height
-        return win_width, win_height
-    except cv2.error:
-        return default_width, default_height
 
 
 def run(cam_index=1):
@@ -219,11 +192,6 @@ def run(cam_index=1):
             last_fps_time = now
 
         analysis = cv2.resize(frame, (ANALYSIS_WIDTH, ANALYSIS_HEIGHT), interpolation=cv2.INTER_AREA)
-        window_width, window_height = get_window_size()
-        display = cv2.resize(analysis, (window_width, window_height), interpolation=cv2.INTER_AREA)
-        window_scale = min(window_width / PREVIEW_WIDTH, window_height / PREVIEW_HEIGHT)
-        font_scale = max(0.4, 0.6 * window_scale)
-        thickness = max(1, int(round(2 * window_scale)))
 
         if loop_index % PROCESS_EVERY_N == 0 or last_debug is None:
             last_debug = detect_turn_direction(analysis, previous_left, previous_right)
@@ -233,17 +201,17 @@ def run(cam_index=1):
         debug = last_debug
         loop_index += 1
 
-        draw_debug(display, debug, font_scale=font_scale, thickness=thickness)
+        draw_debug(analysis, debug)
         cv2.putText(
-            display,
+            analysis,
             f"FPS: {fps:.1f}",
             (10, 20),
             cv2.FONT_HERSHEY_SIMPLEX,
-            font_scale,
+            0.6,
             (0, 255, 0),
-            thickness,
+            2,
         )
-        cv2.imshow(WINDOW_NAME, display)
+        cv2.imshow(WINDOW_NAME, analysis)
 
         if cv2.waitKey(1) & 0xFF == 27:
             break
