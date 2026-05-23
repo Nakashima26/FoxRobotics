@@ -1,11 +1,26 @@
+import os
+
 import cv2
 import numpy as np
 
 class Vision:
     def __init__(self, cam_index=0):
         """Inicializa la cámara y define los rangos de colores."""
-        pipeline = "libcamerasrc ! video/x-raw, width=640, height=480, framerate=30/1 ! videoconvert ! appsink drop=true sync=false"
-        self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+        self.cap = None
+
+        if os.name == "nt":
+            self.cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+        else:
+            pipeline = "libcamerasrc ! video/x-raw, width=640, height=480, framerate=30/1 ! videoconvert ! appsink drop=true sync=false"
+            self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+
+            if not self.cap.isOpened():
+                self.cap = cv2.VideoCapture(cam_index)
+
+        if not self.cap.isOpened():
+            raise RuntimeError(
+                "No se pudo abrir la cámara. En PC usa una webcam conectada y verifica que otro programa no la esté usando."
+            )
 
         self.color_ranges = {
             "Red": [(np.array([0, 150, 100]), np.array([10, 255, 255])),
