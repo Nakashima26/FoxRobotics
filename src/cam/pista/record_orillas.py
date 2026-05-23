@@ -1,6 +1,8 @@
 import argparse
 import re
+import threading
 import time
+from queue import Empty, Full, Queue
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +17,51 @@ OUTPUT_PATTERN = re.compile(r"^orillas(\d+)\.mp4$")
 def create_writer(output_path: str, frame_width: int, frame_height: int, fps: float):
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     return cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
+
+
+class AsyncVideoWriter:
+    def __init__(self, output_path: str, frame_width: int, frame_height: int, fps: float, max_queue_size: int = 8):
+        self.writer = create_writer(output_path, frame_width, frame_height, fps)
+        self.queue = Queue(maxsize=max_queue_size)
+        self.stopped = False
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self.thread.start()
+        return self
+
+    def _run(self):
+        while not self.stopped or not self.queue.empty():
+            try:
+                frame = self.queue.get(timeout=0.05)
+            except Empty:
+                continue
+            try:
+                self.writer.write(frame)
+            finally:
+                self.queue.task_done()
+
+    def write(self, frame):
+        if self.stopped:
+            return
+        try:
+            self.queue.put_nowait(frame)
+        except Full:
+            try:
+                self.queue.get_nowait()
+                self.queue.task_done()
+            except Empty:
+                pass
+            try:
+                self.queue.put_nowait(frame)
+            except Full:
+                pass
+
+    def stop(self):
+        self.stopped = True
+        if self.thread.is_alive():
+            self.thread.join(timeout=2.0)
+        self.writer.release()
 
 
 def next_output_path(directory: Path) -> Path:
@@ -86,9 +133,14 @@ def run(cam_index=1, output_path=None):
             base.draw_debug(recorded_frame, debug, fps=fps)
 
             if writer is None:
-                writer = create_writer(str(output_file), recorded_frame.shape[1], recorded_frame.shape[0], 30.0)
+                writer = AsyncVideoWriter(
+                    str(output_file),
+                    recorded_frame.shape[1],
+                    recorded_frame.shape[0],
+                    30.0,
+                ).start()
 
-            writer.write(recorded_frame)
+            writer.write(recorded_frame.copy())
 
             cv2.imshow(base.WINDOW_NAME, recorded_frame)
 
@@ -97,7 +149,7 @@ def run(cam_index=1, output_path=None):
     finally:
         grabber.stop()
         if writer is not None:
-            writer.release()
+            writer.stop()
         cv2.destroyAllWindows()
 
 
