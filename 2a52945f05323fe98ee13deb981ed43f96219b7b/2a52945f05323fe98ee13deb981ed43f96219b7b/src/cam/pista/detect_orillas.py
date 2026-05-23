@@ -96,13 +96,6 @@ def get_window_image_size(window_name: str, fallback_width: int, fallback_height
     return fallback_width, fallback_height
 
 
-def resize_for_window(frame, window_name: str, fallback_width: int, fallback_height: int):
-    window_width, window_height = get_window_image_size(window_name, fallback_width, fallback_height)
-    if window_width == frame.shape[1] and window_height == frame.shape[0]:
-        return frame.copy()
-    return cv2.resize(frame, (window_width, window_height), interpolation=cv2.INTER_AREA)
-
-
 def build_segment_bounds(width: int, segment_count: int):
     boundaries = [int(round(index * width / segment_count)) for index in range(segment_count + 1)]
     bounds = []
@@ -259,7 +252,6 @@ def run(cam_index=1):
 
         display_frame = analysis.copy()
         draw_debug(display_frame, debug, fps=fps)
-        display_frame = resize_for_window(display_frame, WINDOW_NAME, WINDOW_WIDTH, WINDOW_HEIGHT)
         cv2.imshow(WINDOW_NAME, display_frame)
 
         if cv2.waitKey(1) & 0xFF == 27:
