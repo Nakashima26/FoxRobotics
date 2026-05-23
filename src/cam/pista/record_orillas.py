@@ -1,9 +1,15 @@
 import argparse
+import re
 import time
+from pathlib import Path
+from typing import Optional
 
 import cv2
 
 import detect_orillas as base
+
+
+OUTPUT_PATTERN = re.compile(r"^orillas(\d+)\.mp4$")
 
 
 def create_writer(output_path: str, frame_width: int, frame_height: int, fps: float):
@@ -11,7 +17,33 @@ def create_writer(output_path: str, frame_width: int, frame_height: int, fps: fl
     return cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
 
 
-def run(cam_index=1, output_path="orillas.mp4"):
+def next_output_path(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+
+    highest_index = 0
+    for candidate in directory.glob("orillas*.mp4"):
+        match = OUTPUT_PATTERN.match(candidate.name)
+        if match:
+            highest_index = max(highest_index, int(match.group(1)))
+
+    return directory / f"orillas{highest_index + 1}.mp4"
+
+
+def resolve_output_path(output_path: Optional[str]) -> Path:
+    if output_path:
+        path = Path(output_path)
+        if path.suffix.lower() == ".mp4" and OUTPUT_PATTERN.match(path.name):
+            return next_output_path(path.parent)
+        if path.is_dir() or not path.suffix:
+            return next_output_path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    return next_output_path(Path.cwd())
+
+
+def run(cam_index=1, output_path=None):
+    output_file = resolve_output_path(output_path)
     grabber = base.FrameGrabber(cam_index).start()
     previous_left = None
     previous_right = None
@@ -54,7 +86,7 @@ def run(cam_index=1, output_path="orillas.mp4"):
             base.draw_debug(recorded_frame, debug, fps=fps)
 
             if writer is None:
-                writer = create_writer(output_path, recorded_frame.shape[1], recorded_frame.shape[0], 30.0)
+                writer = create_writer(str(output_file), recorded_frame.shape[1], recorded_frame.shape[0], 30.0)
 
             writer.write(recorded_frame)
 
@@ -72,6 +104,11 @@ def run(cam_index=1, output_path="orillas.mp4"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Detector de orillas con grabacion a video.")
     parser.add_argument("--cam", type=int, default=1, help="Indice de la camara.")
-    parser.add_argument("--output", type=str, default="orillas.mp4", help="Archivo de salida del video.")
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Archivo o carpeta de salida. Si no se indica, crea orillasN.mp4 en la carpeta actual.",
+    )
     args = parser.parse_args()
     run(cam_index=args.cam, output_path=args.output)
