@@ -1,5 +1,6 @@
 import os
 import time
+import threading
 
 import cv2
 import numpy as np
@@ -17,6 +18,11 @@ WINDOW_WIDTH = 320
 WINDOW_HEIGHT = 240
 PROCESS_EVERY_N = 2
 WINDOW_NAME = "Pista"
+
+
+cv2.setUseOptimized(True)
+cpu_count = os.cpu_count() or 1
+cv2.setNumThreads(min(4, cpu_count))
 
 
 def open_camera(cam_index: int):
@@ -41,6 +47,40 @@ def open_camera(cam_index: int):
 
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     return cap
+
+
+class FrameGrabber:
+    def __init__(self, cam_index: int):
+        self.cap = open_camera(cam_index)
+        self.lock = threading.Lock()
+        self.frame = None
+        self.stopped = False
+        self.thread = threading.Thread(target=self._update, daemon=True)
+
+    def start(self):
+        self.thread.start()
+        return self
+
+    def _update(self):
+        while not self.stopped:
+            ret, frame = self.cap.read()
+            if not ret:
+                self.stopped = True
+                break
+            with self.lock:
+                self.frame = frame
+
+    def read(self):
+        with self.lock:
+            if self.frame is None:
+                return False, None
+            return True, self.frame.copy()
+
+    def stop(self):
+        self.stopped = True
+        if self.thread.is_alive():
+            self.thread.join(timeout=1.0)
+        self.cap.release()
 
 
 def detect_turn_direction(frame, previous_left=None, previous_right=None, top_ratio=0.30):
@@ -125,7 +165,7 @@ def draw_debug(frame, debug):
 
 
 def run(cam_index=1):
-    cap = open_camera(cam_index)
+    grabber = FrameGrabber(cam_index).start()
     previous_left = None
     previous_right = None
     last_fps_time = time.perf_counter()
@@ -138,14 +178,10 @@ def run(cam_index=1):
     cv2.resizeWindow(WINDOW_NAME, WINDOW_WIDTH, WINDOW_HEIGHT)
 
     while True:
-        for _ in range(PROCESS_EVERY_N - 1):
-            if not cap.grab():
-                break
-
-        ret, frame = cap.retrieve()
+        ret, frame = grabber.read()
         if not ret:
-            print("No frame captured", flush=True)
-            break
+            time.sleep(0.005)
+            continue
 
         frame_count += 1
         now = time.perf_counter()
@@ -181,7 +217,7 @@ def run(cam_index=1):
         if cv2.waitKey(1) & 0xFF == 27:
             break
 
-    cap.release()
+    grabber.stop()
     cv2.destroyAllWindows()
 
 
