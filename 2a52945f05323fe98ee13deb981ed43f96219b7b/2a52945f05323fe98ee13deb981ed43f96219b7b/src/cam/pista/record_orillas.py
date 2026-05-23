@@ -12,6 +12,8 @@ import detect_orillas as base
 
 
 OUTPUT_PATTERN = re.compile(r"^orillas(\d+)\.mp4$")
+RECORD_EVERY_N = 6
+DEFAULT_RECORD_FPS = 5.0
 
 
 def create_writer(output_path: str, frame_width: int, frame_height: int, fps: float):
@@ -132,15 +134,17 @@ def run(cam_index=1, output_path=None):
             recorded_frame = analysis.copy()
             base.draw_debug(recorded_frame, debug, fps=fps)
 
-            if writer is None:
-                writer = AsyncVideoWriter(
-                    str(output_file),
-                    recorded_frame.shape[1],
-                    recorded_frame.shape[0],
-                    30.0,
-                ).start()
+            if loop_index % RECORD_EVERY_N == 0:
+                if writer is None:
+                    record_fps = max(DEFAULT_RECORD_FPS, fps / RECORD_EVERY_N) if fps > 0 else DEFAULT_RECORD_FPS
+                    writer = AsyncVideoWriter(
+                        str(output_file),
+                        recorded_frame.shape[1],
+                        recorded_frame.shape[0],
+                        record_fps,
+                    ).start()
 
-            writer.write(recorded_frame.copy())
+                writer.write(recorded_frame.copy())
 
             cv2.imshow(base.WINDOW_NAME, recorded_frame)
 
