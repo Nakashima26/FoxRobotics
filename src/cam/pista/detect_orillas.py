@@ -1,4 +1,5 @@
 import os
+import time
 
 import cv2
 import numpy as np
@@ -8,6 +9,8 @@ import numpy as np
 # Ajustable segun la luz real de la pista.
 WOOD_LOWER = np.array([5, 25, 40])
 WOOD_UPPER = np.array([35, 180, 255])
+PREVIEW_WIDTH = 320
+PREVIEW_HEIGHT = 240
 
 
 def open_camera(cam_index: int):
@@ -16,7 +19,11 @@ def open_camera(cam_index: int):
         if not cap.isOpened():
             cap = cv2.VideoCapture(cam_index)
     else:
-        pipeline = "libcamerasrc ! video/x-raw, width=1640, height=1232, framerate=30/1 ! videoconvert ! videoscale ! video/x-raw, width=640, height=480 ! appsink drop=true sync=false"
+        pipeline = (
+            "libcamerasrc ! video/x-raw, width=1640, height=1232, framerate=30/1 "
+            "! videoconvert ! videoscale ! video/x-raw, width=320, height=240 "
+            "! appsink drop=true sync=false"
+        )
         cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
 
         if not cap.isOpened():
@@ -106,6 +113,9 @@ def run(cam_index=1):
     cap = open_camera(cam_index)
     previous_left = None
     previous_right = None
+    last_fps_time = time.perf_counter()
+    fps = 0.0
+    frame_count = 0
 
     while True:
         ret, frame = cap.read()
@@ -113,12 +123,30 @@ def run(cam_index=1):
             print("No frame captured", flush=True)
             break
 
+        frame_count += 1
+        now = time.perf_counter()
+        elapsed = now - last_fps_time
+        if elapsed >= 1.0:
+            fps = frame_count / elapsed
+            frame_count = 0
+            last_fps_time = now
+
         debug = detect_turn_direction(frame, previous_left, previous_right)
         previous_left = debug["left_ratio"]
         previous_right = debug["right_ratio"]
 
         draw_debug(frame, debug)
-        cv2.imshow("Pista", frame)
+        cv2.putText(
+            frame,
+            f"FPS: {fps:.1f}",
+            (10, 20),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 0),
+            2,
+        )
+        preview = cv2.resize(frame, (PREVIEW_WIDTH, PREVIEW_HEIGHT), interpolation=cv2.INTER_AREA)
+        cv2.imshow("Pista", preview)
 
         if cv2.waitKey(1) & 0xFF == 27:
             break
