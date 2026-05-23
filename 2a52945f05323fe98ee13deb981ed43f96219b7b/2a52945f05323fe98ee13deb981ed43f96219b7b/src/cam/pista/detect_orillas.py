@@ -16,7 +16,7 @@ def open_camera(cam_index: int):
         if not cap.isOpened():
             cap = cv2.VideoCapture(cam_index)
     else:
-        pipeline = "libcamerasrc ! video/x-raw, width=640, height=480, framerate=30/1 ! videoconvert ! appsink drop=true sync=false"
+        pipeline = "libcamerasrc ! video/x-raw, width=1640, height=1232, framerate=30/1 ! videoconvert ! videoscale ! video/x-raw, width=640, height=480 ! appsink drop=true sync=false"
         cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
 
         if not cap.isOpened():
