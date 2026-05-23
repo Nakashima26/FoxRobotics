@@ -20,9 +20,10 @@ def open_camera(cam_index: int):
             cap = cv2.VideoCapture(cam_index)
     else:
         pipeline = (
-            "libcamerasrc ! video/x-raw, width=1640, height=1232, framerate=30/1 "
+            "libcamerasrc ! queue max-size-buffers=1 leaky=downstream "
+            "! video/x-raw, width=1640, height=1232, framerate=30/1 "
             "! videoconvert ! videoscale ! video/x-raw, width=320, height=240 "
-            "! appsink drop=true sync=false"
+            "! appsink drop=true max-buffers=1 sync=false"
         )
         cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
 
@@ -31,6 +32,8 @@ def open_camera(cam_index: int):
 
     if not cap.isOpened():
         raise RuntimeError("No se pudo abrir la camara.")
+
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     return cap
 
 
@@ -118,7 +121,11 @@ def run(cam_index=1):
     frame_count = 0
 
     while True:
-        ret, frame = cap.read()
+        for _ in range(2):
+            if not cap.grab():
+                break
+
+        ret, frame = cap.retrieve()
         if not ret:
             print("No frame captured", flush=True)
             break
@@ -131,13 +138,15 @@ def run(cam_index=1):
             frame_count = 0
             last_fps_time = now
 
-        debug = detect_turn_direction(frame, previous_left, previous_right)
+        preview = cv2.resize(frame, (PREVIEW_WIDTH, PREVIEW_HEIGHT), interpolation=cv2.INTER_AREA)
+
+        debug = detect_turn_direction(preview, previous_left, previous_right)
         previous_left = debug["left_ratio"]
         previous_right = debug["right_ratio"]
 
-        draw_debug(frame, debug)
+        draw_debug(preview, debug)
         cv2.putText(
-            frame,
+            preview,
             f"FPS: {fps:.1f}",
             (10, 20),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -145,7 +154,6 @@ def run(cam_index=1):
             (0, 255, 0),
             2,
         )
-        preview = cv2.resize(frame, (PREVIEW_WIDTH, PREVIEW_HEIGHT), interpolation=cv2.INTER_AREA)
         cv2.imshow("Pista", preview)
 
         if cv2.waitKey(1) & 0xFF == 27:
