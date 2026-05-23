@@ -17,6 +17,7 @@ PREVIEW_HEIGHT = 480
 WINDOW_WIDTH = 320
 WINDOW_HEIGHT = 240
 PROCESS_EVERY_N = 3
+ROI_SEGMENTS = 5
 WINDOW_NAME = "Pista"
 
 
@@ -83,6 +84,37 @@ class FrameGrabber:
         self.cap.release()
 
 
+def get_window_image_size(window_name: str, fallback_width: int, fallback_height: int):
+    try:
+        _, _, window_width, window_height = cv2.getWindowImageRect(window_name)
+    except cv2.error:
+        return fallback_width, fallback_height
+
+    if window_width > 0 and window_height > 0:
+        return window_width, window_height
+
+    return fallback_width, fallback_height
+
+
+def resize_for_window(frame, window_name: str, fallback_width: int, fallback_height: int):
+    window_width, window_height = get_window_image_size(window_name, fallback_width, fallback_height)
+    if window_width == frame.shape[1] and window_height == frame.shape[0]:
+        return frame.copy()
+    return cv2.resize(frame, (window_width, window_height), interpolation=cv2.INTER_AREA)
+
+
+def build_segment_bounds(width: int, segment_count: int):
+    boundaries = [int(round(index * width / segment_count)) for index in range(segment_count + 1)]
+    bounds = []
+
+    for index in range(segment_count):
+        left = boundaries[index]
+        right = boundaries[index + 1] - 1 if index < segment_count - 1 else width - 1
+        bounds.append((left, max(left, right)))
+
+    return bounds
+
+
 def detect_turn_direction(frame, previous_left=None, previous_right=None, top_ratio=0.30):
     height, width = frame.shape[:2]
     top_limit = max(1, int(height * top_ratio))
@@ -92,9 +124,9 @@ def detect_turn_direction(frame, previous_left=None, previous_right=None, top_ra
     mask = cv2.inRange(hsv, WOOD_LOWER, WOOD_UPPER)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
-    mid = width // 2
-    left_mask = mask[:, :mid]
-    right_mask = mask[:, mid:]
+    segment_bounds = build_segment_bounds(width, ROI_SEGMENTS)
+    left_mask = mask[:, segment_bounds[0][0] : segment_bounds[0][1] + 1]
+    right_mask = mask[:, segment_bounds[-1][0] : segment_bounds[-1][1] + 1]
 
     left_count = int(cv2.countNonZero(left_mask))
     right_count = int(cv2.countNonZero(right_mask))
@@ -118,18 +150,28 @@ def detect_turn_direction(frame, previous_left=None, previous_right=None, top_ra
         "left_ratio": left_ratio,
         "right_ratio": right_ratio,
         "top_ratio": top_ratio,
+        "segment_count": ROI_SEGMENTS,
         "turn_text": turn_text,
     }
     return debug
 
 
-def draw_debug(frame, debug):
+def draw_debug(frame, debug, fps=None):
     height, width = frame.shape[:2]
     top_limit = max(1, int(height * debug["top_ratio"]))
-    mid = width // 2
+    segment_bounds = build_segment_bounds(width, debug.get("segment_count", ROI_SEGMENTS))
 
-    cv2.rectangle(frame, (0, 0), (mid - 1, top_limit - 1), (0, 255, 0), 1)
-    cv2.rectangle(frame, (mid, 0), (width - 1, top_limit - 1), (0, 255, 255), 1)
+    for index, (left, right) in enumerate(segment_bounds):
+        if index == 0:
+            color = (0, 255, 0)
+            thickness = 2
+        elif index == len(segment_bounds) - 1:
+            color = (0, 255, 255)
+            thickness = 2
+        else:
+            color = (100, 100, 100)
+            thickness = 1
+        cv2.rectangle(frame, (left, 0), (right, top_limit - 1), color, thickness)
 
     overlay = frame.copy()
     resized_mask = cv2.resize(debug["mask"], (width, height), interpolation=cv2.INTER_NEAREST)
@@ -143,24 +185,38 @@ def draw_debug(frame, debug):
     )
     frame[:top_limit, :] = overlay[:top_limit, :]
 
+    font_scale = max(0.5, height / 900.0)
+    font_thickness = max(1, int(round(height / 500.0)))
+    text_y = min(height - 10, top_limit + int(25 * (height / 480.0)))
+
     cv2.putText(
         frame,
         f"L={debug['left_ratio']:.3f} R={debug['right_ratio']:.3f}",
-        (10, top_limit + 25),
+        (10, text_y),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
+        font_scale,
         (255, 255, 255),
-        2,
+        font_thickness,
     )
     if debug["turn_text"]:
         cv2.putText(
             frame,
             debug["turn_text"],
-            (10, top_limit + 55),
+            (10, min(height - 10, text_y + int(30 * font_scale))),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
+            font_scale,
             (0, 0, 255),
-            2,
+            font_thickness,
+        )
+    if fps is not None:
+        cv2.putText(
+            frame,
+            f"FPS: {fps:.1f}",
+            (10, max(20, int(20 * (height / 480.0)))),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            (0, 255, 0),
+            font_thickness,
         )
 
 
@@ -201,17 +257,10 @@ def run(cam_index=1):
         debug = last_debug
         loop_index += 1
 
-        draw_debug(analysis, debug)
-        cv2.putText(
-            analysis,
-            f"FPS: {fps:.1f}",
-            (10, 20),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 255, 0),
-            2,
-        )
-        cv2.imshow(WINDOW_NAME, analysis)
+        display_frame = analysis.copy()
+        draw_debug(display_frame, debug, fps=fps)
+        display_frame = resize_for_window(display_frame, WINDOW_NAME, WINDOW_WIDTH, WINDOW_HEIGHT)
+        cv2.imshow(WINDOW_NAME, display_frame)
 
         if cv2.waitKey(1) & 0xFF == 27:
             break
