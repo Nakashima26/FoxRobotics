@@ -9,11 +9,14 @@ import numpy as np
 # Ajustable segun la luz real de la pista.
 WOOD_LOWER = np.array([5, 25, 40])
 WOOD_UPPER = np.array([35, 180, 255])
-ANALYSIS_WIDTH = 160
-ANALYSIS_HEIGHT = 120
-PREVIEW_WIDTH = 256
-PREVIEW_HEIGHT = 144
+ANALYSIS_WIDTH = 640
+ANALYSIS_HEIGHT = 480
+PREVIEW_WIDTH = 640
+PREVIEW_HEIGHT = 480
+WINDOW_WIDTH = 320
+WINDOW_HEIGHT = 240
 PROCESS_EVERY_N = 2
+WINDOW_NAME = "Pista"
 
 
 def open_camera(cam_index: int):
@@ -131,6 +134,9 @@ def run(cam_index=1):
     loop_index = 0
     last_debug = None
 
+    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(WINDOW_NAME, WINDOW_WIDTH, WINDOW_HEIGHT)
+
     while True:
         for _ in range(PROCESS_EVERY_N - 1):
             if not cap.grab():
@@ -170,7 +176,7 @@ def run(cam_index=1):
             (0, 255, 0),
             2,
         )
-        cv2.imshow("Pista", preview)
+        cv2.imshow(WINDOW_NAME, preview)
 
         if cv2.waitKey(1) & 0xFF == 27:
             break
