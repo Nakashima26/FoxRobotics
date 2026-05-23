@@ -91,7 +91,13 @@ def draw_debug(frame, debug):
     overlay = frame.copy()
     resized_mask = cv2.resize(debug["mask"], (width, height), interpolation=cv2.INTER_NEAREST)
     colored_mask = cv2.cvtColor(resized_mask, cv2.COLOR_GRAY2BGR)
-    overlay[:top_limit, :] = cv2.addWeighted(frame[:top_limit, :], 0.65, colored_mask, 0.35, 0)
+    overlay[:top_limit, :] = cv2.addWeighted(
+        frame[:top_limit, :],
+        0.65,
+        colored_mask[:top_limit, :],
+        0.35,
+        0,
+    )
     frame[:top_limit, :] = overlay[:top_limit, :]
 
     cv2.putText(
