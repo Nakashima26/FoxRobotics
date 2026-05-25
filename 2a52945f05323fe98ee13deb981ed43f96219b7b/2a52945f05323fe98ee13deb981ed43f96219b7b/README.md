@@ -1,10 +1,10 @@
 # 🤖 WRO 2026 — Future Engineers | Self-Driving Car
 
 > **Team:** FoxRobotics
-> **Members:** Erick Blanco · Jesse Banda · Cesar Ahumada
-> **Coach:** Daniel Millan
-> **Country / Region:** México — Baja California
-> **Season:** 2026
+> **| Members:** Erick Blanco · Jesse Banda · Cesar Ahumada
+> **| Coach:** Daniel Millan
+> **| Country / Region:** México — Baja California
+> **| Season:** 2026
 
 ---
 
