@@ -41,7 +41,7 @@ Our vehicle is a custom-built autonomous car designed for the WRO 2026 Future En
 | IMU | MPU-6050 (gyroscope + accelerometer) |
 | Drive motor | DC sg90 180° servo |
 | Battery (motor) | 3S LiPo 11.1V 2200 mAh |
- Power | Step Down Mini560 5V - 3A|
+ Power | Step Down Mini560 5V - 5A|
 
 # Bill of Materials (BOM)
 
