@@ -1,4 +1,4 @@
-# 🤖 WRO 2026 — Future Engineers | Self-Driving Car
+# WRO 2026 — Future Engineers | Self-Driving Car
 
 > **Team:** FoxRobotics
 > **| Members:** Erick Blanco · Jesse Banda · Cesar Ahumada
@@ -8,7 +8,7 @@
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 1. [Vehicle Overview](#1-vehicle-overview)
 2. [Mechanical Design & Mobility](#2-mechanical-design--mobility)
@@ -24,7 +24,7 @@
 
 # 1. Vehicle Overview
 
-Our vehicle is a custom-built autonomous car designed for the WRO 2026 Future Engineers — Self-Driving Cars challenge. It must complete 3 laps around a randomized track, detect and correctly pass colored traffic sign pillars (red on the right, green on the left), and perform a parallel parking maneuver at the end of the Obstacle Challenge round.
+Our vehicle is a custom-built autonomous car for the WRO 2026 Future Engineers — Self-Driving Cars challenge. It needs to complete 3 laps around a randomized track, detect and correctly pass colored traffic sign pillars (red on the right, green on the left), and park itself at the end of the Obstacle Challenge round.
 
 **Key specifications:**
 
@@ -41,7 +41,7 @@ Our vehicle is a custom-built autonomous car designed for the WRO 2026 Future En
 | IMU | MPU-6050 (gyroscope + accelerometer) |
 | Drive motor | DC sg90 180° servo |
 | Battery (motor) | 3S LiPo 11.1V 2200 mAh |
- Power | Step Down Mini560 5V - 5A|
+| Power | Step Down Mini560 5V - 5A |
 
 # Bill of Materials (BOM)
 
@@ -103,7 +103,7 @@ Our vehicle is a custom-built autonomous car designed for the WRO 2026 Future En
 
 | ID | Component | Description | Quantity | Supplier | Approximate Cost |
 |---|---|---|---|---|---|
-| 32 | Ovonic 2200mAh 3S | 3-cell LiPo battery used to power the robot’s electronic and drive systems. | 1 | E-Bay | 13 USD |
+| 32 | Ovonic 2200mAh 3S | 3-cell LiPo battery used to power the robot's electronic and drive systems. | 1 | E-Bay | 13 USD |
 
 ---
 
@@ -135,13 +135,11 @@ Our vehicle is a custom-built autonomous car designed for the WRO 2026 Future En
 
 # 2. Mechanical Design & Mobility
 
-### 2.1 Chassis Selection & Justification
+### 2.1 Chassis selection
 
-The chassis was fully custom-designed to integrate all the components required to successfully complete the different challenges of the competition. The main structure was 3D printed using red and black SUNLU PLA filament on a Bambu Lab A1 printer. The design focused on maintaining a lightweight structure while still providing enough rigidity to support the drivetrain, sensors, and electronic components.
+The chassis was designed from scratch to fit all the components we needed for competition. We printed it in red and black SUNLU PLA on a Bambu Lab A1, keeping the structure as light as possible without sacrificing the rigidity the drivetrain and electronics require.
 
-To increase the mechanical strength and reliability of the drivetrain, LEGO axles were used for all wheel transmission shafts. Specifically, two LEGO axle pieces (6135494) were used for the front section, while two LEGO axle pieces (4535768) were implemented on the rear axle assembly. These components were selected because they provide higher rigidity and better dimensional consistency compared to fully 3D-printed shafts, reducing bending and improving power transmission efficiency.
-
-Additionally, LEGO bushings (6121485) were incorporated into the rear axle system to reduce friction between moving parts. This helped improve rotational smoothness, minimize mechanical resistance, and reduce unwanted energy losses during operation.
+For wheel transmission shafts, we used LEGO axles throughout: part 6135494 for the front and part 4535768 for the rear. This wasn't an aesthetic choice — LEGO axles have much better dimensional consistency than fully printed shafts, which flex under load and cause alignment issues. We also added LEGO bushings (6121485) to the rear axle to cut down on friction between moving parts.
 
 | Component   | Material / Part | Purpose                 |
 | ----------- | --------------- | ----------------------- |
@@ -151,69 +149,37 @@ Additionally, LEGO bushings (6121485) were incorporated into the rear axle syste
 | Bushings    | LEGO 6121485    | Friction reduction      |
 | Printer     | Bambu Lab A1    | Manufacturing process   |
 
-The chassis was manufactured using PLA filament because it offered an effective balance between rigidity, print quality, manufacturing speed, and dimensional accuracy. Since the robot was designed for indoor competition conditions without exposure to high temperatures or extreme impacts, PLA provided sufficient mechanical strength while remaining lightweight and easy to manufacture.
-
-Compared to other materials such as PETG or ABS, PLA allowed faster prototyping and more consistent print results, which was especially important during the iterative design and testing process. Its higher stiffness also helped reduce flexing in structural components, improving drivetrain alignment and overall mechanical stability.
-
-Another important factor was reliability during printing. PLA produces less warping than ABS, enabling more precise parts and reducing manufacturing errors, which helped accelerate development and replacement of components during testing.
-
-Although materials such as PETG offer greater impact resistance and ABS provides better thermal resistance, these properties were not critical for the competition environment. Therefore, PLA was selected because its advantages in rigidity, dimensional precision, and rapid manufacturing better matched the requirements of the robot.
+We used PLA because it prints fast, doesn't warp like ABS, and is stiff enough for indoor competition conditions. PETG has better impact resistance and ABS handles heat better, but neither of those properties matters much for a robot running on a flat mat indoors. What did matter was being able to iterate quickly and get consistent parts, and PLA delivered on both.
 
 ### 2.2 Wheels
-The vehicle uses LEGO wheels selected after evaluating multiple options for diameter, axle compatibility, and traction performance. The rear wheels use rim 4299389 paired with tire 4184286, while the front wheels use rim 6251174 paired with tire 6182551. Both axles use the same 43 mm outer diameter, which simplified the mechanical design by keeping the vehicle ride height consistent front to rear and avoiding any pitch bias in the chassis.
 
-Since the drivetrain relies on LEGO axles for the differential and steering linkage, LEGO-compatible rims were a natural fit — they mount directly onto the axles without custom adapters, eliminating potential wobble or play that an adapter-based solution could introduce at the wheel interface.
+We tested several wheel options before settling on LEGO parts. The rear wheels use rim 4299389 with tire 4184286, and the front uses rim 6251174 with tire 6182551. Both have a 43 mm outer diameter, which keeps the ride height even front to rear.
 
-The 43 mm diameter was validated against our target motor RPM: at the selected gear ratio, this diameter produces a linear speed that keeps PWM duty cycles in the 40–70% range during normal operation, preserving sufficient resolution for smooth speed control in both directions. Choosing a significantly larger diameter would have pushed operating duty cycles above 85%, compressing the usable throttle range and reducing fine-speed control precision.
+Since the drivetrain already uses LEGO axles, LEGO-compatible rims were the obvious fit — they mount directly without adapters, which removes a potential source of wobble at the wheel interface.
 
-Traction was validated empirically on the competition mat surface: the vehicle was run at full throttle on a straight section and through 
-representative corners, confirming that the rear tires produced no detectable slip on the white matte WRO field surface. The rubber compound of the LEGO tires provided sufficient grip without requiring any surface treatment or tire preparation.
+The 43 mm diameter was also validated against our motor RPM target. At our gear ratio, this diameter puts normal operation in the 40–70% PWM range, which gives us enough resolution for smooth speed control. A noticeably larger wheel would push operating duty cycles above 85% and compress the usable throttle range.
 
-### 2.3 Drive System (Torque vs. Speed Analysis)
+We ran the car at full throttle on the competition mat surface and saw no detectable slip at the rear. The LEGO rubber compound grips the white matte WRO field without any prep needed.
 
-The robot uses an N20 DC motor with a 50:1 internal gearbox as the main 
-propulsion system. This motor was selected for its compact form factor 
-(12 × 10 × 26 mm) while still delivering sufficient torque for the 
-vehicle's target weight of approximately 1.5 kg.
+### 2.3 Drive system (torque vs. speed analysis)
 
-Between the motor output shaft and the differential input, an additional 
-2:1 gear reduction was implemented using a LEGO gear stage. This brings 
-the overall drivetrain reduction to **100:1**, producing an estimated 
-output torque of approximately 1.76 kg·cm at the rear axle.
+The main drive is an N20 DC motor with a 50:1 internal gearbox — compact at 12 × 10 × 26 mm and still enough torque for a ~1.5 kg vehicle. Between the motor output shaft and the differential, we added a 2:1 LEGO gear stage, bringing the total drivetrain reduction to **100:1** and estimated rear axle torque to about 1.76 kg·cm.
 
-Regarding the differential, this was also printed using PLA, 
+**Why 100:1 and not just 50:1?**
 
-**Why 100:1 and not a lower reduction?**
+We ran the 50:1 configuration first. It was faster, but corner exits were inconsistent — the rear wheels would occasionally lose traction under acceleration, causing yaw disturbances the PID couldn't fully catch. At 100:1, top speed dropped but torque delivery became smooth and predictable all the way through the speed range. Corner exits became repeatable, which turned out to be a prerequisite for reliable PID tuning.
 
-We evaluated the 50:1 configuration first (bypassing the additional gear 
-stage). At 50:1, the vehicle reached higher top speed but exhibited 
-inconsistent behavior when exiting corners — the rear wheels occasionally 
-lost traction under acceleration, producing unpredictable yaw disturbances 
-that the PID controller could not fully compensate for. At 100:1, top speed 
-decreased but torque delivery became smooth and consistent through the full 
-speed range. Corner exit behavior became repeatable, which was a prerequisite 
-for reliable PID tuning.
+The ratio also keeps the motor in its efficient RPM band during most of the run, which matters because the motor shares a power rail with the ESP32 logic.
 
-The selected ratio also keeps the motor operating in its efficient RPM band 
-for the majority of the run, reducing heat buildup and current draw — 
-important given that the motor shares a power rail with the ESP32 logic. 
+The car completes all three Open Challenge laps in about 12 seconds at just 60% motor speed. That headroom is useful if we need to push speed in later iterations.
 
-Using this configuration, the vehicle successfully completed all three laps 
-of the Open Challenge course in approximately 12 seconds, operating at only 
-60% of its maximum motor speed — demonstrating that the 100:1 drivetrain 
-ratio provides ample torque margin and leaves room for speed optimization 
-in future iterations if needed.
+**The takeaway:** we prioritized consistency over raw speed. A robot that reliably finishes 3 laps scores more than one that's faster but unpredictable.
 
-**Conclusion:** We prioritized consistency and controllability over raw 
-speed. A robot that reliably completes 3 laps scores more than one that 
-is faster but unpredictable.
+### 2.4 Steering — rack-and-pinion with Ackermann geometry
 
-### 2.4 Steering System — Rack-and-Pinion + Ackermann Geometry
+Steering is controlled by an SG90 servo connected to both front knuckles through a rack-and-pinion mechanism with symmetric tie rods.
 
-Steering is controlled by an **SG90 servo** connected to both front 
-knuckles through a **rack-and-pinion mechanism** with symmetric tie rods.
-
-**Mechanism specifications:**
+**Mechanism specs:**
 
 | Parameter | Value |
 |---|---|
@@ -228,26 +194,13 @@ knuckles through a **rack-and-pinion mechanism** with symmetric tie rods.
 
 **Kinematic analysis:**
 
-The pinion pitch diameter of 14 mm gives a pitch circumference of 
-**43.98 mm**. Each degree of servo rotation therefore displaces the rack 
-by **0.1222 mm**. With the SG90 operating across its full 90° per side 
-from center, the rack travels **11.00 mm per side**, producing an 
-effective front wheel steering angle of **±43°**.
+The 14 mm pitch diameter gives a pitch circumference of 43.98 mm. Each degree of servo rotation moves the rack 0.1222 mm. At 90° per side from center, the rack travels 11.00 mm per side — producing ±43° at the front wheels.
 
-Note: the outer diameter of the pinion measures 16 mm, which corresponds 
-exactly to the standard gear addendum formula for module 1 
-(d_outer = dp + 2×m = 14 + 2 = 16 mm), confirming the module and tooth 
-count are correct.
+The outer diameter of 16 mm confirms the module (d_outer = dp + 2×m = 14 + 2 = 16 mm).
 
-The 2.50:1 transmission ratio reduces steering sensitivity at the wheel 
-relative to the servo command, providing finer angular control resolution. 
-A lower ratio would make steering response too abrupt for the PID inner 
-loop to handle smoothly at its 50 Hz update rate.
+The 2.50:1 ratio reduces steering sensitivity at the wheel, which gives the PID inner loop finer control at its 50 Hz update rate. A lower ratio would make steering response too abrupt.
 
-The ±43° effective wheel angle is sufficient to complete the tightest 
-corners of the Open Challenge course (minimum corridor width: 600 mm) 
-and to execute the parallel parking maneuver, while keeping the servo 
-within its rated mechanical range at all times.
+The ±43° range clears the tightest corners in the Open Challenge (minimum corridor 600 mm) and handles the parallel parking maneuver, all within the servo's rated mechanical range.
 
 **Servo PWM calibration:**
 
@@ -259,72 +212,61 @@ within its rated mechanical range at all times.
 
 **Why rack-and-pinion over a direct servo arm?**
 
-A direct servo arm attached to a single knuckle only controls that wheel 
-directly. The opposite knuckle, linked by a fixed-length tie rod, receives 
-an angle that is geometrically correct only at center — producing toe-in 
-or toe-out at all other positions. The rack distributes symmetric linear 
-displacement to both tie rods simultaneously, so both front wheels receive 
-the correct angular input at every steering position. Combined with the 
-Ackermann geometry of the front knuckles, each wheel follows its correct 
-turning radius independently, eliminating lateral tire scrub and making 
-steering response linear and predictable across the full ±43° range.
+A direct arm only controls one wheel directly. The opposite knuckle, linked by a fixed-length tie rod, gets an angle that's geometrically correct only at center — producing toe error everywhere else. The rack pushes both tie rods symmetrically, so both wheels get the right angle at every steering position. Combined with the Ackermann geometry of the knuckles, each wheel tracks its own correct turning radius. No lateral scrub, and steering response is linear across the full range.
 
 ---
 
 # 3. Power Architecture & Sensors
 
-### 3.1 Power Budget
+### 3.1 Power budget
 
-Overall, the entire vehicle is powered by an Ovonic 2200mAh 3S LiPo battery. The power is distributed between the motor driver, which supplies the DC motor, and the rest of the electronic components through a MINI560 step-down converter. This converter regulates the voltage to a stable 5V at up to 5A, providing sufficient power for the Raspberry Pi 4 Model B, the ESP32, and the remaining peripherals.
+The whole vehicle runs off an Ovonic 2200mAh 3S LiPo. Power splits two ways: the motor driver takes battery voltage directly for the DC motor, and everything else goes through a MINI560 step-down converter producing a stable 5V at up to 5A.
 
-| Rail | Source | Consumers| Max Current Draw |
-| ---| --- | --- | --- |
-| 5V Logic             | MINI560 Step-Down Converter | Raspberry Pi 4 Model B + RaspiCam V2, ESP32, HC-SR04, MPU6050, sg90| ~4.0 A  |
-| Battery / Main Power | Ovonic 2200mAh 3S LiPo  | Entire vehicle power distribution | ~35 A discharge capability |
+| Rail | Source | Consumers | Max Current Draw |
+|---|---|---|---|
+| 5V Logic | MINI560 Step-Down Converter | Raspberry Pi 4 Model B + RaspiCam V2, ESP32, HC-SR04, MPU6050, sg90 | ~4.0 A |
+| Battery / Main Power | Ovonic 2200mAh 3S LiPo | Entire vehicle power distribution | ~35 A discharge capability |
 | Motor Power | Motor Driver directly from 3S LiPo | DC drive motor | ~1.6 A peak |
 | 3.3V Internal | ESP32 internal regulator | I²C communication and internal ESP32 logic, Level Shifter | ~200 mA |
 
+The Ovonic battery is rated 120C continuous, which is theoretically 264 A. We're drawing about 4.5 A peak — under 2% of its discharge capability. There's no shortage of headroom here.
 
-The Ovonic 2200mAh 3S LiPo battery is rated at 120C continuous discharge, which corresponds to a theoretical maximum discharge current of approximately 264 A. Considering that the vehicle operates at an estimated peak current draw of around 4.5 A, the system uses less than 2% of the battery’s maximum discharge capability. This provides a very large safety margin and ensures stable power delivery for both the propulsion and electronic systems.
+### 3.2 Sensor selection and placement
 
-### 3.2 Sensor Selection & Placement
+| Sensor | Purpose | Placement | Notes |
+|---|---|---|---|
+| Raspberry Pi Camera Module V2 | Lane and obstacle detection | Front-center, 15° downward tilt | Main vision system using OpenCV |
+| HC-SR04 ×2 | Wall distance measurement | Left and right sides of the vehicle | Filtered readings for stable navigation |
+| MPU-6050 | Heading and turn estimation | Center of chassis | Used for orientation correction |
 
-| Sensor                        | Purpose                     | Placement                       | Notes                                   |
-| ----------------------------- | --------------------------- | ------------------------------- | --------------------------------------- |
-| Raspberry Pi Camera Module V2 | Lane and obstacle detection | Front-center, 15° downward tilt | Main vision system using OpenCV         |
-| HC-SR04 ×2                    | Wall distance measurement   | Left and right sides of the vehicle | Filtered readings for stable navigation |
-| MPU-6050                      | Heading and turn estimation | Center of chassis               | Used for orientation correction         |
+#### Camera System (Raspberry Pi Camera V2 with wide-angle lens)
 
-#### Camera System (Raspberry Pi Camera V2 with Wide-Angle Lens)
-- The main perception system of the vehicle is based on a Raspberry Pi Camera Module V2 equipped with a wide-angle lens. This camera is responsible for detecting lane boundaries, identifying traffic signs and colored pillars, and providing the visual data required for autonomous navigation. Image processing is performed onboard by the Raspberry Pi 4 Model B using OpenCV in real time.
+The camera handles lane detection, traffic sign identification, and colored pillar detection. Image processing runs on the Raspberry Pi 4 using OpenCV in real time.
 
-- The camera is mounted at the front-center section of the robot with a slight downward inclination of approximately 15°. Several mounting positions were tested during development. Initially, the camera was placed horizontally; however, this configuration captured excessive background information, which increased unnecessary image processing and reduced detection efficiency. By tilting the camera downward, the field of view became focused primarily on the track and obstacle zones, improving detection reliability and reducing computational load.
+It's mounted at the front-center with a 15° downward tilt. We tested horizontal mounting first, but that captured too much background, slowing detection and generating noise. Tilting it down focused the field of view on the track and obstacle zones, cutting both false positives and computational load.
 
-#### HC-SR04 Ultrasonic Sensors
-- The vehicle uses two HC-SR04 ultrasonic sensors to measure the distance between the robot and the surrounding walls. These sensors are used to assist with lateral positioning, wall following, and corner navigation throughout the autonomous run.
+#### HC-SR04 ultrasonic sensors
 
-- During the development process, VL53L0X Time-of-Flight sensors were initially evaluated as an alternative because of their higher precision and faster response time. However, after extensive testing inside the arena, it was observed that the black walls frequently produced unstable or incorrect readings due to poor light reflection. This caused inconsistent distance measurements that negatively affected the stability of the vehicle during navigation.
+Two HC-SR04s measure distance to the surrounding walls. They drive lateral positioning, wall following, and corner navigation.
 
-- In comparison, although the HC-SR04 sensors can produce noisier measurements, their readings proved to be significantly more reliable under the competition conditions. By implementing software filtering techniques, such as averaging and invalid reading rejection, the ultrasonic sensors provided sufficiently stable and consistent distance measurements for autonomous operation.
+We originally tested VL53L0X time-of-flight sensors. On paper they win — ±3 mm accuracy versus ±15 mm for the HC-SR04, and a narrower beam. In practice, the black competition walls absorbed their 940 nm IR signal and consistently returned out-of-range readings at 300 mm. The HC-SR04 reflects off any surface regardless of color. We went with reliability over precision and made up the accuracy difference with software filtering.
 
-- The sensors are mounted on both sides of the chasis. Their data is continuously processed by the control system to maintain a stable trajectory inside the arena.
+Both sensors are mounted on opposite sides of the chassis. Readings are averaged and invalid values rejected before they reach the PID.
 
-#### MPU-6050 IMU (Gyroscope and Accelerometer)
-- The vehicle also uses an MPU-6050 inertial measurement unit, which combines a gyroscope and accelerometer. This sensor provides orientation and rotational data that supports the navigation system during cornering and rapid maneuvers.
+#### MPU-6050 IMU
 
-- The gyroscope is primarily used to estimate the robot’s heading and detect rotational movement while turning. This information helps the robot maintain directional stability and complements the visual information obtained from the camera. The sensor is mounted near the center of the chassis in a flat orientation to minimize vibration effects and improve measurement consistency.
+The MPU-6050 gives us heading and rotation data during cornering and fast maneuvers. The gyroscope estimates the robot's heading and feeds the inner PID loop, complementing what the camera sees.
 
-- To improve reliability, the IMU performs an automatic calibration process during startup. While the robot remains stationary, multiple readings are averaged to determine the gyroscope bias. This offset is then compensated in software throughout operation, reducing drift and improving angular estimation accuracy during autonomous driving.
+On startup, the IMU averages multiple readings while the robot is stationary to calculate gyroscope bias. That offset is subtracted throughout the run, which cuts drift and keeps angular estimation accurate over the course of three laps.
 
 ---
 
 ## 4. Software Architecture
 
-### 4.1 System Overview
+### 4.1 System overview
 
-The current implementation runs entirely on the **ESP32**, which handles
-all sensor reads, PID computation, state transitions, and actuator control
-in a single real-time loop. No external computer is involved during the run.
+The current implementation runs entirely on the ESP32, which handles sensor reads, PID computation, state transitions, and actuator control in a single real-time loop.
+
 ```
 ┌──────────────────────────────────────────────────┐
 │                     ESP32                        │
@@ -342,7 +284,8 @@ in a single real-time loop. No external computer is involved during the run.
 
 ### 4.2 Finite State Machine (FSM)
 
-The firmware implements a 3-state FSM:
+The firmware uses a 3-state FSM:
+
 ```
       ┌─────────────┐
       │  SIGUIENDO  │  Normal lane following — cascade PID active
@@ -359,20 +302,17 @@ The firmware implements a 3-state FSM:
       └─────────────┘
 ```
 
-A fourth state `EVADIENDO` exists in the codebase for Bluetooth-triggered
-lateral avoidance during bench testing. It is not used during competition runs.
+A fourth state `EVADIENDO` exists in the codebase for Bluetooth-triggered lateral avoidance during bench testing. It doesn't run during competition.
 
 **Corner detection:**
 
-A corner is triggered when either ultrasonic sensor reads above **100 cm**
-— meaning the wall has disappeared to one side. Two guards prevent false
-triggers:
+A corner fires when either ultrasonic reads above 100 cm, meaning a wall has disappeared to one side. Two guards prevent false triggers:
 - `millis() > 9000` — ignores the first 9 seconds after start
 - `cooldownGiro = 2000 ms` — prevents the same corner from being counted twice
 
 **Turn direction:**
 
-The first detected corner determines the driving direction for the entire run:
+The first detected corner sets the driving direction for the entire run:
 
 ```cpp
 if (!primerGiro) {
@@ -381,12 +321,9 @@ if (!primerGiro) {
 }
 ```
 
-If the left wall disappears first, the vehicle is turning left —
-consistent with counterclockwise driving. All subsequent corners
-use the same direction, matching the WRO rules requirement that the
-vehicle maintains a consistent direction throughout the run.
+If the left wall disappears first, the vehicle turns left — counterclockwise. All subsequent corners follow the same direction, which matches the WRO rules requirement.
 
-### 4.3 Lane Following — Dual Cascade PID
+### 4.3 Lane following — dual cascade PID
 
 **The problem with a single-loop PID:**
 
@@ -396,14 +333,10 @@ The original controller used a single error signal:
 error = distL - distR
 ```
 
-This worked when the vehicle was aligned parallel to the walls.
-However, when yaw exceeded ~**30°**, the HC-SR04's conical beam
-hit the wall obliquely. Both sensors simultaneously over-reported
-their distances, so `distL - distR` stayed near zero even as the
-vehicle drifted toward a wall. The controller perceived no error
-and did nothing — causing wall contacts in roughly 30% of test runs.
+This worked fine when the vehicle was parallel to the walls. Past about 30° of yaw, the HC-SR04's conical beam hit the wall at an oblique angle. Both sensors simultaneously over-reported their distances, so `distL - distR` sat near zero even as the vehicle drifted toward a wall. The controller saw no error and did nothing — causing wall contacts in roughly 30% of test runs.
 
 **The solution — cascade architecture:**
+
 ```
                 ┌────────────────────┐   heading    ┌────────────────────┐
   distL─distR ─►│     OUTER PID      │─ setpoint ──►│     INNER PID      │──► servo
@@ -413,10 +346,7 @@ and did nothing — causing wall contacts in roughly 30% of test runs.
                   HC-SR04 readings                    MPU-6050 yaw
 ```
 
-The outer PID produces a target heading from the lateral wall error.
-The inner PID drives the servo to achieve that heading using the IMU —
-which is independent of wall color or beam geometry and remains accurate
-at any vehicle angle.
+The outer PID produces a target heading from the lateral wall error. The inner PID drives the servo to that heading using the IMU, which doesn't care about wall color or beam geometry and stays accurate at any vehicle angle.
 
 ```cpp
 // OUTER PID — wall centering
@@ -450,15 +380,11 @@ escribirServo(centroServo + (int)output);
 
 **Why no integral terms?**
 
-With Ki enabled, the integral accumulated error during straight sections.
-At corner entry, the stored integral produced a large steering impulse
-that overcorrected toward the opposite wall. Removing Ki from both loops
-eliminated this entirely.
+With Ki enabled, the integral built up error during straight sections. At corner entry, the stored value produced a large steering impulse that overcorrected toward the opposite wall. Removing Ki from both loops fixed this entirely. The derivative terms provide enough steady-state correction on their own.
 
-### 4.4 Sensor Filtering — Exponential Moving Average
+### 4.4 Sensor filtering — exponential moving average
 
-Raw HC-SR04 readings contain occasional spikes from floor reflections
-in curved sections. An EMA filter smooths these before they reach the PID:
+Raw HC-SR04 readings spike occasionally from floor reflections in curved sections. An EMA filter smooths them before they reach the PID:
 
 ```cpp
 float filtroEMA(float nueva, float anterior) {
@@ -466,14 +392,11 @@ float filtroEMA(float nueva, float anterior) {
 }
 ```
 
-Alpha = **0.75** weights recent readings heavily for fast response to
-genuine wall changes, while still attenuating single spike values.
-Lower values (tested down to 0.3) introduced lag that caused the outer
-PID to react too slowly to real lateral drift.
+Alpha = 0.75 weights recent readings heavily for fast response to genuine wall changes while still killing single spike values. We tested down to 0.3; anything below 0.5 introduced lag that slowed the outer PID's reaction to real lateral drift.
 
-### 4.5 Corner Turning — Progressive Speed Ramp
+### 4.5 Corner turning — progressive speed ramp
 
-During a corner, speed reduces progressively as IMU yaw accumulates:
+During a corner, speed drops in steps as IMU yaw accumulates:
 
 ```cpp
 if      (delta < 45) velocidadMotor = 165;
@@ -481,14 +404,11 @@ else if (delta < 70) velocidadMotor = 145;
 else                 velocidadMotor = 120;
 ```
 
-This improves positioning accuracy at corner exit. Once
-`|anguloGyro| >= 82°`, the servo returns to center and
-`anguloObjetivo` is updated to anchor the inner PID to the
-new straight heading.
+This gives better positioning accuracy at corner exit. Once `|anguloGyro| >= 82°`, the servo returns to center and `anguloObjetivo` updates to anchor the inner PID to the new straight heading.
 
-### 4.6 IMU Heading Integration
+### 4.6 IMU heading integration
 
-Yaw is computed by integrating the MPU-6050 Z-axis at each loop iteration:
+Yaw is computed by integrating the MPU-6050 Z-axis each loop iteration:
 
 ```cpp
 float gyroZ = mpu.getGyroZ();
@@ -496,31 +416,28 @@ if (abs(gyroZ) < 1.0) gyroZ = 0;   // 1°/s deadband suppresses drift
 anguloGyro += gyroZ * dt;
 ```
 
-The **1°/s deadband** prevents MEMS thermal noise from accumulating
-into the integrated heading during straight travel. Without it,
-the inner PID applies a constant small steering offset to correct
-phantom heading drift, degrading straight-line tracking.
+The 1°/s deadband prevents MEMS thermal noise from accumulating into the integrated heading during straight travel. Without it, the inner PID applies a constant small steering offset to correct phantom heading drift, which slowly degrades straight-line tracking.
 
-### 4.7 Development Status
+### 4.7 Development status
 
 | Module | Status |
 |---|---|
-| ESP32 lane following (Open Challenge) | ✅ Complete |
-| Corner detection and turn execution | ✅ Complete |
-| IMU-based heading control | ✅ Complete |
-| Camera pillar detection (Raspberry Pi) | 🔄 In development |
-| ESP32 ↔ Raspberry Pi UART communication | 🔄 In development |
-| Obstacle avoidance FSM integration | 🔄 In development |
-| Parking maneuver | 🔄 In development |
+| ESP32 lane following (Open Challenge) | Complete |
+| Corner detection and turn execution | Complete |
+| IMU-based heading control | Complete |
+| Camera pillar detection (Raspberry Pi) | In development |
+| ESP32 ↔ Raspberry Pi UART communication | In development |
+| Obstacle avoidance FSM integration | In development |
+| Parking maneuver | In development |
+
 ---
 
 ## 5. Systemic Thinking & Engineering Decisions
 
-### 5.1 Subsystem Interaction Map
+### 5.1 Subsystem interaction map
 
-Every subsystem in the vehicle affects at least one other. The diagram
-below shows how data flows from sensors to actuators in the current
-Open Challenge implementation:
+Every subsystem affects at least one other. Here's how data flows from sensors to actuators in the current Open Challenge implementation:
+
 ```
     [HC-SR04 L] ──dist_L──►┐
                             ├──► OUTER PID ──heading_sp──► INNER PID ──► SG90 Servo
@@ -533,64 +450,29 @@ Open Challenge implementation:
                                         └──speed_cmd──► N20 Motor
 ```
 
-The ESP32 runs all of this in a single loop. The IMU is sampled at
-every iteration (~100 Hz effective), ultrasonics at ~20 Hz (limited
-by HC-SR04 pulse timing), and the FSM evaluates state transitions
-after every sensor update.
+The ESP32 runs all of this in a single loop. The IMU samples at ~100 Hz, ultrasonics at ~20 Hz (limited by HC-SR04 pulse timing), and the FSM evaluates state transitions after every sensor update.
 
-### 5.2 Key Engineering Trade-offs
+### 5.2 Key engineering trade-offs
 
 **Trade-off 1: VL53L0X ToF vs. HC-SR04 ultrasonic**
 
-The VL53L0X offers ±3 mm precision vs. ±15 mm for the HC-SR04, and
-a narrower beam angle. However, the WRO 2026 field walls are matte
-black (rules 13.4 and 13.6), which absorbs 940 nm infrared. In our
-tests, the VL53L0X returned out-of-range values on the black inner
-wall in the majority of measurements at 300 mm distance. The HC-SR04
-reflects off any surface regardless of color. We chose reliability
-over precision and compensated with the EMA filter and the cascade
-PID architecture.
+The VL53L0X has ±3 mm precision versus ±15 mm for the HC-SR04 and a narrower beam. But the WRO 2026 field walls are matte black (rules 13.4 and 13.6), which absorbs 940 nm infrared. In our tests the VL53L0X returned out-of-range values on the black inner wall for most measurements at 300 mm distance. The HC-SR04 reflects off any surface regardless of color. We chose reliability and made up the difference with the EMA filter and cascade PID.
 
 **Trade-off 2: Single-loop PID vs. cascade PID**
 
-A single loop based on `distL - distR` is simpler to tune (2 gains
-instead of 4). However, it fails when vehicle yaw exceeds ~30° because
-both ultrasonic sensors simultaneously over-report distance at oblique
-angles, masking the real lateral error. The cascade architecture adds
-an IMU-based inner loop that corrects heading independently of
-ultrasonic geometry. The additional tuning complexity was accepted
-because it directly eliminated wall contacts that occurred in ~30%
-of test runs with the single-loop approach.
+A single loop based on `distL - distR` is simpler to tune — 2 gains instead of 4. But it fails when vehicle yaw exceeds ~30° because both sensors simultaneously over-report distance at oblique angles, hiding the real lateral error. The cascade approach adds an IMU-based inner loop that corrects heading independently of ultrasonic geometry. The extra tuning complexity was worth it: it directly eliminated wall contacts that happened in ~30% of single-loop test runs.
 
 **Trade-off 3: Integral term enabled vs. disabled**
 
-Full PID (with Ki) was implemented in v1.0 for both loops. The
-integral of the outer loop accumulated error during long straight
-sections. At corner entry, the stored integral produced a large
-steering impulse that overcorrected toward the opposite wall.
-Removing Ki from both loops eliminated this behavior. The derivative
-terms alone provide sufficient steady-state correction.
+Full PID with Ki was implemented in v1.0 for both loops. The integral of the outer loop accumulated error on long straights. At corner entry, the stored value produced a large steering impulse that overcorrected toward the opposite wall. Removing Ki from both loops fixed this. The derivative terms alone handle steady-state correction.
 
-**Trade-off 4: Monolithic architecture (ESP32 only) vs. 
-heterogeneous architecture (ESP32 + Raspberry Pi)**
+**Trade-off 4: ESP32 only vs. ESP32 + Raspberry Pi**
 
-Running all logic on a single ESP32 would simplify the system —
-no inter-device communication, no Linux boot latency, no UART
-protocol to maintain. However, real-time computer vision for
-traffic sign detection introduces constraints that make a single-
-controller approach impractical.
+Running everything on a single ESP32 would simplify the system — no inter-device communication, no Linux boot latency, no UART protocol to maintain. But real-time computer vision creates constraints that make a single-controller setup impractical.
 
-The Raspberry Pi Camera Module captures frames that must be decoded,
-color-space converted, and masked via OpenCV before a decision can
-be made. On the Raspberry Pi 4, a single HSV masking pass on a
-640×480 frame takes approximately 8–15 ms. While this is acceptable
-for vision alone, combining it with simultaneous motor PWM generation,
-ultrasonic triggering, and IMU integration on the same processor
-introduces non-deterministic scheduling delays — Linux cannot
-guarantee that a GPIO pulse fires within a specific microsecond
-window when a CPU-intensive OpenCV operation is running concurrently.
+On the Raspberry Pi 4, a single HSV masking pass on a 640×480 frame takes 8–15 ms. That's fine for vision alone. Combine it with simultaneous motor PWM generation, ultrasonic triggering, and IMU integration on the same processor, and you get non-deterministic scheduling delays. Linux can't guarantee a GPIO pulse fires within a specific microsecond window when an OpenCV operation is running concurrently.
 
-The solution is a **heterogeneous split by responsibility**:
+The solution is splitting responsibility by hardware strength:
 
 | Responsibility | Controller | Reason |
 |---|---|---|
@@ -602,17 +484,11 @@ The solution is a **heterogeneous split by responsibility**:
 | OpenCV color detection | Raspberry Pi | Requires full CPU core |
 | High-level FSM (Obstacle) | Raspberry Pi | Coordinates vision + avoidance commands |
 
-This architecture allows each controller to operate within its
-strengths. The ESP32 handles the vehicle at the hardware level with
-deterministic timing, while the Raspberry Pi handles vision at its
-own frame rate without affecting the control loop. Commands from
-the Pi arrive over UART and update the ESP32 FSM state — if a
-UART packet is delayed by 10 ms due to OpenCV processing, the ESP32
-continues executing the last valid command rather than stalling.
+Each controller runs within its strengths. The ESP32 handles the vehicle at the hardware level with deterministic timing; the Pi handles vision at its own frame rate without touching the control loop. Commands from the Pi arrive over UART and update the ESP32 FSM state — if a UART packet is delayed 10 ms because OpenCV is busy, the ESP32 keeps running on the last valid command rather than stalling.
 
-### 5.3 Iteration Log
+### 5.3 Iteration log
 
-| Version | Change | Problem Solved | Outcome |
+| Version | Change | Problem solved | Outcome |
 |---|---|---|---|
 | v1.0 | Single-loop PID on distL−distR, VL53L0X ToF | Baseline | ToF failed on black walls; wall contacts at high yaw |
 | v1.1 | Replaced VL53L0X with HC-SR04 | ToF absorbed by black walls | Wall detection reliable across full distance range |
@@ -622,7 +498,7 @@ continues executing the last valid command rather than stalling.
 | v1.5 | Progressive speed ramp during corner turn | Positioning error at corner exit | More consistent corner exit heading |
 | v1.6 | 1°/s deadband on gyro integration | MEMS thermal drift accumulating in straight travel | Straight-line heading stability improved |
 
-### 5.4 Risk Analysis
+### 5.4 Risk analysis
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
@@ -636,21 +512,21 @@ continues executing the last valid command rather than stalling.
 
 # 6. How to Build & Run
 
-### 6.1 Hardware Requirements
+### 6.1 Hardware requirements
 
 - Raspberry Pi 4 (2 GB RAM minimum)
 - ESP32 DevKit v1
 - Raspberry Pi Camera Module v2 + wide-angle lens adapter
-- HC-sr04 sensors × 2
+- HC-SR04 sensors × 2
 - MPU-6050 IMU
-- sg90 Servo
-- 12V n20 DC motor with 1:50 gearbox
-- tb6612fng motor driver (or equivalent)
-- 3S LiPo 2200 mAh 
+- SG90 Servo
+- 12V N20 DC motor with 1:50 gearbox
+- TB6612FNG motor driver (or equivalent)
+- 3S LiPo 2200 mAh
 - Level Shifter
 - MINI560 Step Down
 
-### 6.2 Software Dependencies
+### 6.2 Software dependencies
 
 **Raspberry Pi (Python 3.10+):**
 ```bash
@@ -662,7 +538,7 @@ pip install opencv-python picamera2 pyserial numpy RPi.GPIO smbus2
 Libraries: Wire.h, MPU6050_tockn
 ```
 
-### 6.3 Flashing & Running
+### 6.3 Flashing & running
 
 **Step 1 — Flash ESP32:**
 ```bash
@@ -698,8 +574,8 @@ python wroPI.py --mode obstacle_challenge
 FoxRobotics/
 │
 ├── electrical/
-│   ├── WRO_RevA/               #Contains all the KiCad project for the PCB
-│   └── PCB_dimensions.png      #Dimensions used for designing the PCB
+│   ├── WRO_RevA/               # KiCad project for the PCB
+│   └── PCB_dimensions.png      # Dimensions used for designing the PCB
 │
 ├── src/
 │   ├── RASPI/
@@ -718,11 +594,11 @@ FoxRobotics/
 │   │        └── wroSave.py              
 │   │
 │   └── esp32/
-│       ├── Controller.ino                  # Main esp32 controller
+│       ├── Controller.ino                  # Main ESP32 controller
 │       └── TestCodes/
 │           ├── LeerSerialESP32/            # Test code for serial read
 │           │    └── LeerSerialESP32.ino  
-│           ├── LeerUltrasonicosESP32/      # Test code for Ultrasonic reading
+│           ├── LeerUltrasonicosESP32/      # Test code for ultrasonic reading
 │           │    └── LeerUltrasonicosESP32.ino
 │           ├── TestDiretional/             # Test code for directional movement
 │           │    └── TestDiretional.ino
@@ -737,9 +613,9 @@ FoxRobotics/
 │
 ├── t-photos/                         # Team photos
 │
-├── v-photos/                         #Vehicle photos
+├── v-photos/                         # Vehicle photos
 │
-├── video/                            #Operating vehicle
+├── video/                            # Operating vehicle
 │
 └── README.md                         # This file
 ```
@@ -756,7 +632,7 @@ FoxRobotics/
 
 # 9. Photos
 
-> Photos are located in [`v-photos/`](v-photos/)
+> Photos are in [`v-photos/`](v-photos/)
 
 | View | Filename |
 |---|---|
