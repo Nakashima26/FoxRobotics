@@ -39,7 +39,7 @@ Our vehicle is a custom-built autonomous car for the WRO 2026 Future Engineers â
 | Vision | Raspberry Pi Camera v2 (FOV 62) |
 | Distance sensors | HC-SR04(5V) x 2 (left, right) + Level Shifter 5V - 3.3V |
 | IMU | MPU-6050 (gyroscope + accelerometer) |
-| Drive motor | DC sg90 180Â° servo |
+| Drive motor | N20 DC Motor  |
 | Battery (motor) | 3S LiPo 11.1V 2200 mAh |
 | Power | Step Down Mini560 5V - 5A |
 
@@ -88,7 +88,7 @@ Our vehicle is a custom-built autonomous car for the WRO 2026 Future Engineers â
 | ID | Component | Description | Quantity | Supplier | Approximate Cost |
 |---|---|---|---|---|---|
 | 23 | ESP32 | Main microcontroller responsible for sensor processing, control algorithms, and overall robot operation. | 1 | Unit Electronics | 8 USD |
-| 24 | Raspi4 Model B | Processes computer vision tasks and handles high-level autonomous navigation functions. | 1 | Amazon | 60 USD |
+| 24 | Raspberry Pi 4 Model B | Processes computer vision tasks and handles high-level autonomous navigation functions. | 1 | Amazon | 60 USD |
 | 25 | Mini560 5V - 3A | Voltage regulator used to power the Raspberry Pi, ESP32, and peripherals. | 1 | Amazon | 6 USD |
 | 26 | MPU 6050 | 6-axis IMU sensor used to measure acceleration, angular velocity, and robot orientation. | 1 | Unit Electronics | 3 USD |
 | 27 | HC-SR04 | Ultrasonic distance sensor used for obstacle detection and distance measurement. | 2 | Unit Electronics | 7 USD |
