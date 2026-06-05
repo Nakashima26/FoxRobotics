@@ -592,6 +592,19 @@ def parse_args():
 
 
 def main():
+	try:
+		import RPi.GPIO as GPIO
+		GPIO.setmode(GPIO.BCM)
+		GPIO.setup(4, GPIO.OUT)
+		GPIO.setup(2, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+		GPIO.output(4, GPIO.HIGH)
+		print("[GPIO] GPIO4=HIGH. Esperando boton en GPIO2...", flush=True)
+		while GPIO.input(2) == GPIO.LOW:
+			time.sleep(0.05)
+		print("[GPIO] Boton detectado. Iniciando...", flush=True)
+	except ImportError:
+		print("[GPIO] RPi.GPIO no disponible, omitiendo espera de boton.", flush=True)
+
 	args = parse_args()
 	threaded_capture = True
 	if args.no_threaded_capture:
