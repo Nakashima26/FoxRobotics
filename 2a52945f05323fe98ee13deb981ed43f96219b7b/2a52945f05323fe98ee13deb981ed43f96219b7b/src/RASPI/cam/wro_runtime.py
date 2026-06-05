@@ -595,11 +595,11 @@ def main():
 	try:
 		import RPi.GPIO as GPIO
 		GPIO.setmode(GPIO.BCM)
-		GPIO.setup(4, GPIO.OUT)
-		GPIO.setup(2, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-		GPIO.output(4, GPIO.HIGH)
-		print("[GPIO] GPIO4=HIGH. Esperando boton en GPIO2...", flush=True)
-		while GPIO.input(2) == GPIO.LOW:
+		GPIO.setup(27, GPIO.OUT)
+		GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+		GPIO.output(27, GPIO.HIGH)
+		print("[GPIO] GPIO27=HIGH. Esperando boton en GPIO17...", flush=True)
+		while GPIO.input(17) == GPIO.LOW:
 			time.sleep(0.05)
 		print("[GPIO] Boton detectado. Iniciando...", flush=True)
 	except ImportError:
