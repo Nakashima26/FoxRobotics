@@ -291,6 +291,11 @@ class IntegratedRuntime:
 		self.record_count = 0
 		self.output_file = resolve_output_path(cfg.record_output) if cfg.record_orillas else None
 
+		try:
+			self.vision.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+		except Exception:
+			pass
+
 	@staticmethod
 	def largest_object(objects):
 		if not objects:
