@@ -15,7 +15,7 @@ Start the integrated runtime:
 ```bash
 cd ~/FoxRobotics
 source .venv/bin/activate
-python src/RASPI/cam/wro_runtime.py --cam-index 0 --serial-port /dev/serial0 --baudrate 115200 --protocol signed --threaded-capture
+python src/RASPI/cam/wro_runtime.py --cam-index 0 --serial-port /dev/ttyAMA0 --baudrate 115200 --protocol signed --threaded-capture
 ```
 
 Start it with track-edge recording:
@@ -23,7 +23,7 @@ Start it with track-edge recording:
 ```bash
 cd ~/FoxRobotics
 source .venv/bin/activate
-python src/RASPI/cam/wro_runtime.py --cam-index 0 --serial-port /dev/serial0 --baudrate 115200 --protocol signed --threaded-capture --record-orillas --record-output ./videos_orillas
+python src/RASPI/cam/wro_runtime.py --cam-index 0 --serial-port /dev/ttyAMA0 --baudrate 115200 --protocol signed --threaded-capture --record-orillas --record-output ./videos_orillas
 ```
 
 ### ESP32
