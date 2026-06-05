@@ -154,6 +154,7 @@ class Config:
 	show_window: bool = True
 	process_every_n: int = 3
 	threaded_capture: bool = True
+	warmup_frames: int = 40
 
 	red_target_px: int = 140
 	green_target_px: int = 500
@@ -505,9 +506,24 @@ class IntegratedRuntime:
 
 		self.video_writer.write(frame.copy())
 
-	def run(self):
+	def run(self, on_ready=None):
 		self.serial_link.open()
 		self.start_capture()
+
+		# Descarta los primeros frames hasta que la exposicion de la camara se estabilice
+		print(f"[INFO] Calentando camara ({self.cfg.warmup_frames} frames)...", flush=True)
+		warmed = 0
+		while warmed < self.cfg.warmup_frames:
+			ret, _ = self.read_frame()
+			if ret:
+				warmed += 1
+			else:
+				time.sleep(0.01)
+		print("[INFO] Camara estabilizada.", flush=True)
+
+		if on_ready is not None:
+			on_ready()
+
 		print("[INFO] Iniciando control WRO integrado. ESC para salir.", flush=True)
 
 		last_fps_time = time.perf_counter()
@@ -592,18 +608,25 @@ def parse_args():
 
 
 def main():
+	_gpio = None
 	try:
 		import RPi.GPIO as GPIO
+		_gpio = GPIO
 		GPIO.setmode(GPIO.BCM)
 		GPIO.setup(27, GPIO.OUT)
 		GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-		GPIO.output(27, GPIO.HIGH)
-		print("[GPIO] GPIO27=HIGH. Esperando boton en GPIO17...", flush=True)
+		GPIO.output(27, GPIO.LOW)  # LED apagado: aun no esta listo
+		print("[GPIO] Esperando boton en GPIO17...", flush=True)
 		while GPIO.input(17) == GPIO.LOW:
 			time.sleep(0.05)
 		print("[GPIO] Boton detectado. Iniciando...", flush=True)
 	except ImportError:
 		print("[GPIO] RPi.GPIO no disponible, omitiendo espera de boton.", flush=True)
+
+	def led_on():
+		if _gpio is not None:
+			_gpio.output(27, _gpio.HIGH)
+			print("[GPIO] LED encendido - sistema listo.", flush=True)
 
 	args = parse_args()
 	threaded_capture = True
@@ -626,7 +649,7 @@ def main():
 		show_window=not args.no_window,
 	)
 	runtime = IntegratedRuntime(cfg)
-	runtime.run()
+	runtime.run(on_ready=led_on)
 
 
 if __name__ == "__main__":

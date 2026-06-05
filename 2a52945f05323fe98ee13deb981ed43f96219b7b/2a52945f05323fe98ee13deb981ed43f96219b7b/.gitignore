@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# Arduino build artifacts
+build/
+*.elf
+*.hex
+*.bin
+
+# Video output
+*.mp4
+*.avi
+*.mkv
+
+# Logs
+*.log

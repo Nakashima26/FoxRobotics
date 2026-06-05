@@ -1,4 +1,8 @@
-Electromechanical diagrams
-====
+# Electromechanical Diagrams
 
-This directory must contain one or several schematic diagrams in form of JPEG, PNG or PDF of the electromechanical components illustrating all the elements (electronic components and motors) used in the vehicle and how they connect to each other.
+| File | Description |
+|---|---|
+| `schematic.png` | PCB schematic — all electronic components and their connections (KiCad export) |
+| `wiring_diagram.png` | Full wiring diagram — component interconnections, power rails, and signal lines |
+
+The full KiCad project (editable schematic + PCB layout) is in [`electrical/WRO_RevA/`](../electrical/WRO_RevA/).

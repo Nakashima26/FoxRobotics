@@ -31,7 +31,7 @@ Our vehicle is a custom-built autonomous car for the WRO 2026 Future Engineers �
 | Parameter | Value |
 |---|---|
 | Dimensions | 210 × 140 × 80 mm |
-| Weight | 564 kg |
+| Weight | 564 g |
 | Drive type | Rear-wheel drive (RWD) |
 | Steering | Ackermann servo steering |
 | Main controller | Raspberry Pi 4 Model B |
@@ -551,19 +551,25 @@ cd src/ESP32
 ```bash
 git clone https://github.com/Nakashima26/FoxRobotics.git
 cd FoxRobotics
-pip install -r requirements.txt
+pip install opencv-python picamera2 pyserial numpy RPi.GPIO smbus2
 # Enable camera: sudo raspi-config → Interface Options → Camera → Enable
 ```
 
 **Step 3 — Run (Open Challenge):**
 ```bash
-cd src/RASPI
-python wroPI.py --mode open_challenge
+cd src/RASPI/cam
+python wro_runtime.py
 ```
 
 **Step 4 — Run (Obstacle Challenge):**
 ```bash
-python wroPI.py --mode obstacle_challenge
+python wro_runtime.py
+```
+
+**Step 5 — Autostart on boot (Raspberry Pi):**
+```bash
+chmod +x scripts/install_autostart_pi.sh
+sudo ./scripts/install_autostart_pi.sh
 ```
 
 ---
@@ -573,60 +579,71 @@ python wroPI.py --mode obstacle_challenge
 ```
 FoxRobotics/
 │
-├── electrical/
-│   ├── WRO_RevA/               # KiCad project for the PCB
-│   └── PCB_dimensions.png      # Dimensions used for designing the PCB
-│
 ├── src/
 │   ├── RASPI/
-│   │   └── cam/                   # Raspi4 camera + CV for obstacle challenge
-│   │        ├── __pycache__/   
-│   │        ├── pista/       
-│   │        ├── calibration.py                 
-│   │        ├── control.py                 
-│   │        ├── controlPI.py                
-│   │        ├── DistGyro.py                
-│   │        ├── Serial.py                
-│   │        ├── Vision.py                  
-│   │        ├── Vision_2.py               
-│   │        ├── wro.py    
-│   │        ├── wroPI.py   
-│   │        └── wroSave.py              
+│   │   ├── cam/                        # Raspberry Pi vision & high-level logic
+│   │   │   ├── wro_runtime.py          # Entry point — starts the vehicle
+│   │   │   ├── wro.py                  # WRO challenge logic & obstacle avoidance
+│   │   │   ├── vision.py               # OpenCV HSV lane & pillar detection
+│   │   │   ├── controlPI.py            # Motor/servo command abstraction
+│   │   │   ├── Serial.py               # UART interface to ESP32
+│   │   │   ├── DistGyro.py             # Sensor data aggregation
+│   │   │   ├── calibration.py          # Camera intrinsics & distortion correction
+│   │   │   ├── pista/
+│   │   │   │   ├── detect_orillas.py   # Track edge detection
+│   │   │   │   └── record_orillas.py   # Record edge detection video
+│   │   │   └── _archive/               # Legacy / superseded files
+│   │   └── tests/                      # UART & simulation debug utilities
+│   │       ├── diagnose_uart.py
+│   │       ├── test_serial_debug.py
+│   │       ├── test_uart_simple.py
+│   │       └── simulacion.py
 │   │
-│   └── esp32/
-│       ├── Controller.ino                  # Main ESP32 controller
+│   └── ESP32/
+│       ├── Controller_PI.ino           # Main firmware (cascade PID + FSM)
+│       ├── _archive/                   # Previous firmware iteration
 │       └── TestCodes/
-│           ├── LeerSerialESP32/            # Test code for serial read
-│           │    └── LeerSerialESP32.ino  
-│           ├── LeerUltrasonicosESP32/      # Test code for ultrasonic reading
-│           │    └── LeerUltrasonicosESP32.ino
-│           ├── TestDiretional/             # Test code for directional movement
-│           │    └── TestDiretional.ino
-│           ├── TestGyro/                   # Test code for gyroscope reading
-│           │    └── TestGyro.ino  
-│           └── TestDcMotor/                # Test code for DC motor PWM
-│                └── TestDcMotor.ino
+│           ├── LeerSerialESP32/        # Serial communication test
+│           ├── LeerUltrasonicosESP32/  # HC-SR04 test
+│           ├── TestDirectional/        # Servo steering test
+│           ├── TestGyro/               # MPU-6050 test
+│           └── TestDcMotor/            # Motor PWM test
+│
+├── electrical/
+│   ├── WRO_RevA/                       # KiCad PCB project (schematic + layout)
+│   └── PCB_dimensions.png
+│
+├── schemes/
+│   ├── schematic.png                   # PCB schematic (KiCad export)
+│   └── wiring_diagram.png              # Full wiring / component diagram
 │
 ├── models/
-│   ├── cad/                          # SolidWorks CAD
-│   └── stl/                          # 3D printable parts
+│   ├── CAD/                            # SolidWorks design files
+│   └── STL/                            # 3D-printable chassis parts
 │
-├── t-photos/                         # Team photos
+├── deploy/
+│   └── systemd/
+│       └── wro-runtime.service         # Systemd autostart service
 │
-├── v-photos/                         # Vehicle photos
+├── scripts/
+│   └── install_autostart_pi.sh         # Installs systemd service on the Pi
 │
-├── video/                            # Operating vehicle
-│
-└── README.md                         # This file
+├── t-photos/                           # Team photos
+├── v-photos/                           # Vehicle photos
+├── video/
+│   └── video.md                        # Competition run video links
+└── README.md
 ```
 
 ---
 
 # 8. Videos
 
-| Challenge | Video Link | Duration |
-|---|---|---|
-| Open Challenge — 3 laps autonomous | [YouTube link] | |
+| Challenge | Link |
+|---|---|
+| Open Challenge — 3 laps autonomous | [YouTube](https://www.youtube.com/watch?v=J5yrJuZZ5P8) |
+
+> Full video index: [`video/video.md`](video/video.md)
 
 ---
 
