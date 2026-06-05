@@ -290,6 +290,7 @@ class IntegratedRuntime:
 		self.video_writer = None
 		self.record_count = 0
 		self.output_file = resolve_output_path(cfg.record_output) if cfg.record_orillas else None
+		self.last_preview_frame = None
 
 		try:
 			self.vision.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -495,7 +496,8 @@ class IntegratedRuntime:
 				self.loop_count += 1
 				if self.loop_count % self.cfg.process_every_n != 0:
 					if self.cfg.show_window:
-						cv2.imshow("WRO Runtime", frame)
+						preview_frame = self.last_preview_frame if self.last_preview_frame is not None else cv2.flip(frame, 1)
+						cv2.imshow("WRO Runtime", preview_frame)
 						if cv2.waitKey(1) & 0xFF == 27:
 							break
 					continue
@@ -523,6 +525,7 @@ class IntegratedRuntime:
 
 				if self.cfg.show_window:
 					self.annotate(processed_frame, obs_info, turn_hint, left_ratio, right_ratio, serial_msg, fps=fps)
+					self.last_preview_frame = processed_frame.copy()
 					cv2.imshow("WRO Runtime", processed_frame)
 					if cv2.waitKey(1) & 0xFF == 27:
 						break
