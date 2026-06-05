@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_DIR="/home/pi/FoxRobotics"
+REPO_DIR="/home/user/FoxRobotics"
 SERVICE_SRC="$REPO_DIR/deploy/systemd/wro-runtime.service"
 SERVICE_DST="/etc/systemd/system/wro-runtime.service"
 
