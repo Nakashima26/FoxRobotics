@@ -11,10 +11,6 @@ from queue import Empty, Full, Queue
 import cv2
 import numpy as np
 
-try:
-	import serial
-except Exception:
-	serial = None
 
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -140,7 +136,7 @@ def resolve_output_path(output_path: str | None) -> Path:
 @dataclass
 class Config:
 	cam_index: int = 0
-	serial_port: str = "/dev/serial0"
+	serial_port: str = "/dev/ttyAMA0"
 	baudrate: int = 115200
 	protocol: str = "signed"
 	show_window: bool = True
@@ -228,50 +224,72 @@ class SerialLink:
 	def __init__(self, port: str, baudrate: int):
 		self.port = port
 		self.baudrate = baudrate
-		self.ser = None
+		self.fd = None
 
 	def open(self):
-		if serial is None:
-			print("[WARN] pyserial no disponible. Ejecutando sin serial.", flush=True)
-			return
 		try:
-			self.ser = serial.Serial(self.port, self.baudrate, timeout=0.02)
+			import os
+			import termios
+
+			self.fd = os.open(self.port, os.O_RDWR | os.O_NOCTTY)
+
+			attrs = termios.tcgetattr(self.fd)
+			attrs[2] &= ~(termios.CSTOPB | termios.CSIZE)
+			attrs[2] |= termios.CS8
+			attrs[6][termios.VMIN] = 0
+			attrs[6][termios.VTIME] = 2
+			attrs[4] = attrs[5] = termios.B115200
+
+			termios.tcsetattr(self.fd, termios.TCSANOW, attrs)
 			time.sleep(1.0)
-			print(f"[INFO] Serial abierto en {self.port} @ {self.baudrate}", flush=True)
+			print(f"[INFO] UART abierto en {self.port} @ {self.baudrate}", flush=True)
 			self.send_ready_burst()
 		except Exception as exc:
-			self.ser = None
-			print(f"[WARN] No se pudo abrir serial ({self.port}): {exc}", flush=True)
+			self.fd = None
+			print(f"[WARN] No se pudo abrir UART ({self.port}): {exc}", flush=True)
 
 	def send_ready_burst(self):
-		if not self.ser:
+		if not self.fd:
 			return
 		for _ in range(3):
 			try:
-				self.ser.write(b"READY,pi=1\n")
+				os.write(self.fd, b"READY,pi=1\n")
 			except Exception:
 				return
 			time.sleep(0.06)
 
 	def send_line(self, line: str):
-		if not self.ser:
+		if not self.fd:
 			return
-		payload = f"{line}\n".encode("utf-8")
-		self.ser.write(payload)
+		try:
+			payload = f"{line}\n".encode("utf-8")
+			os.write(self.fd, payload)
+		except Exception:
+			pass
 
 	def try_readline(self):
-		if not self.ser:
+		if not self.fd:
 			return ""
 		try:
-			data = self.ser.readline().decode("utf-8", errors="ignore").strip()
-			return data
+			data = b""
+			while True:
+				chunk = os.read(self.fd, 1)
+				if not chunk:
+					break
+				if chunk == b"\n":
+					break
+				data += chunk
+			return data.decode("utf-8", errors="ignore").strip()
 		except Exception:
 			return ""
 
 	def close(self):
-		if self.ser:
-			self.ser.close()
-			self.ser = None
+		if self.fd is not None:
+			try:
+				os.close(self.fd)
+			except Exception:
+				pass
+			self.fd = None
 
 
 class IntegratedRuntime:
@@ -532,7 +550,7 @@ class IntegratedRuntime:
 def parse_args():
 	parser = argparse.ArgumentParser(description="Runtime integrado profesional para WRO Future Engineers.")
 	parser.add_argument("--cam-index", type=int, default=0)
-	parser.add_argument("--serial-port", type=str, default="/dev/serial0")
+	parser.add_argument("--serial-port", type=str, default="/dev/ttyAMA0")
 	parser.add_argument("--baudrate", type=int, default=115200)
 	parser.add_argument("--protocol", choices=["signed", "legacy_x"], default="signed")
 	parser.add_argument("--process-every", type=int, default=3)
