@@ -157,7 +157,7 @@ def main():
     print("SERIAL DEBUG TOOL - Raspberry Pi GPIO 14/15 UART Test")
     print("=" * 60)
 
-    PORT = "/dev/ttyAMA0"
+    PORT = "/dev/ttyS0"
     BAUDRATE = 115200
 
     # Verificar disponibilidad de pines

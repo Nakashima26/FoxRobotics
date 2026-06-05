@@ -4,7 +4,7 @@ import RPi.GPIO as GPIO
 import serial
 
 
-ser = serial.Serial("/dev/ttyUSB0", 115200, timeout=1)
+ser = serial.Serial("/dev/ttyS0", 115200, timeout=1)
 time.sleep(2)
 GPIO.setmode(GPIO.BCM)
 output_pin = 17
