@@ -31,7 +31,7 @@ Our vehicle is a custom-built autonomous car for the WRO 2026 Future Engineers �
 | Parameter | Value |
 |---|---|
 | Dimensions | 210 × 140 × 80 mm |
-| Weight | < 1.5 kg |
+| Weight | 564 kg |
 | Drive type | Rear-wheel drive (RWD) |
 | Steering | Ackermann servo steering |
 | Main controller | Raspberry Pi 4 Model B |
