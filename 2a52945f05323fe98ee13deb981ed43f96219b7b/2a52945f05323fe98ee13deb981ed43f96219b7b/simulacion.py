@@ -33,8 +33,8 @@ CENTER_WALL_THRESHOLD = 250
 
 RED_PIXEL_THRESHOLD = 620
 GREEN_PIXEL_THRESHOLD = 140
-RED_PIXEL_DRAW_LINE = 500
-GREEN_PIXEL_DRAW_LINE = 140
+RED_PIXEL_DRAW_LINE = 140
+GREEN_PIXEL_DRAW_LINE = 500
 OBSTACLE_CLEAR_FRAMES = 10
 OBSTACLE_HOLD_BAND = 24
 OBSTACLE_MEMORY_FRAMES = 18
@@ -114,7 +114,7 @@ def reset_car_state():
     global robot_x, robot_y, robot_heading, target_heading
     global prev_steering_angle, persistencia_obstaculo, obstaculo_clear_frames
     global ultimo_color_obstaculo, ultima_correccion_meta, bloqueo_giro_por_obstaculo
-    global prioridad_obstaculo
+    global prioridad_obstaculo, turn_counter, race_finished
 
     robot_x = INITIAL_ROBOT_X
     robot_y = INITIAL_ROBOT_Y
@@ -128,6 +128,8 @@ def reset_car_state():
     ultima_correccion_meta = 0.0
     bloqueo_giro_por_obstaculo = False
     prioridad_obstaculo = False
+    turn_counter = 0
+    race_finished = False
 
     pid_giro.prev_error = 0
     pid_vision.prev_error = 0
@@ -155,6 +157,8 @@ ultimo_color_obstaculo = None
 ultima_correccion_meta = 0.0
 bloqueo_giro_por_obstaculo = False
 prioridad_obstaculo = False
+turn_counter = 0
+race_finished = False
 frame_counter = 0
 
 font_debug = pygame.font.SysFont(DEBUG_FONT_NAME, DEBUG_FONT_SIZE)
@@ -300,16 +304,22 @@ while running:
 
     # 1. Detección de Esquinas
     # No permitimos el giro de vuelta mientras el obstáculo siga visible o en memoria.
-    if not prioridad_obstaculo and obstaculo_clear_frames >= OBSTACLE_CLEAR_FRAMES and error_alineacion < CORNER_ALIGN_THRESHOLD:
+    if not race_finished and not prioridad_obstaculo and obstaculo_clear_frames >= OBSTACLE_CLEAR_FRAMES and error_alineacion < CORNER_ALIGN_THRESHOLD:
         dist_orilla_izq = calcular_distancia_pared(front_x, front_y, robot_heading + WALL_FRONT_ANGLE_LEFT)
         dist_orilla_der = calcular_distancia_pared(front_x, front_y, robot_heading + WALL_FRONT_ANGLE_RIGHT)
 
         if dist_orilla_izq > CORNER_WALL_THRESHOLD and dist_orilla_der < CORNER_WALL_THRESHOLD:
             target_heading += 90
             target_heading = (target_heading + 180) % 360 - 180
+            turn_counter += 1
+            if turn_counter >= 12:
+                race_finished = True
         elif dist_orilla_der > CORNER_WALL_THRESHOLD and dist_orilla_izq < CORNER_WALL_THRESHOLD:
             target_heading -= 90
             target_heading = (target_heading + 180) % 360 - 180
+            turn_counter += 1
+            if turn_counter >= 12:
+                race_finished = True
     # 3. CONTROL PID DEL SERVO DE DIRECCIÓN
     angulo_deseado_final = target_heading + correccion_meta
     error_giro = (angulo_deseado_final - robot_heading + 180) % 360 - 180 
@@ -335,6 +345,8 @@ while running:
     elif modo_conduccion != "centro":
         velocidad_actual *= AVOIDANCE_SPEED_FACTOR
     velocidad_actual = max(0.6, velocidad_actual)
+    if race_finished:
+        velocidad_actual = 0.0
     
     # El giroscopio real cambia dependiendo de la velocidad y el volante
     delta_heading = math.degrees((velocidad_actual / WHEELBASE) * math.tan(rad_steering))
@@ -405,6 +417,7 @@ while running:
     debug_panel = pygame.Surface((PANEL_WIDTH, 390), pygame.SRCALPHA)
     debug_panel.fill((0, 0, 0, DEBUG_PANEL_ALPHA))
     screen.blit(debug_panel, (MAP_X0, DEBUG_PANEL_Y))
+    lap_display = f"TERMINADO" if race_finished else f"{turn_counter // 4}/3"
     dibujar_debug(
         screen,
         [
@@ -414,12 +427,18 @@ while running:
             f"target: {target_heading:.1f}  align: {error_alineacion:.1f}",
             f"err: {error_giro:.1f}  steer: {steering_angle:.1f}",
             f"raw: {raw_steering_angle:.1f}  corr: {correccion_meta:.1f}",
+            f"vueltas: {lap_display}  giros: {turn_counter}/12",
         ],
         MAP_X0 + PADDING + 5,
         DEBUG_PANEL_Y + PADDING + 10,
         WHITE,
         20,
     )
+
+    if race_finished:
+        font_big = pygame.font.SysFont(DEBUG_FONT_NAME, 48, bold=True)
+        txt = font_big.render("TERMINADO - 3 VUELTAS", True, (0, 255, 0))
+        screen.blit(txt, (MAP_X0 + PANEL_WIDTH // 2 - txt.get_width() // 2, HEIGHT // 2 - 24))
 
     pygame.display.flip()
     clock.tick(FPS)

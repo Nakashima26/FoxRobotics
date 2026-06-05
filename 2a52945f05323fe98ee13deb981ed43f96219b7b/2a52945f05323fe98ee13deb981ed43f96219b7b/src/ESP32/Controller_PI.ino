@@ -88,6 +88,11 @@ const int cooldownGiro = 2000;
 int contadorEsquina = 0;
 const int umbralPared = 100;
 
+// CARRERA
+int turnsCompleted = 0;
+bool raceFinished = false;
+const int TURNS_PER_RACE = 12;
+
 // FILTRO
 float alpha = 0.75;
 float distL_filtrada = 0;
@@ -138,7 +143,7 @@ bool detectarEsquina(long distL, long distR) {
   } else {
     contadorEsquina = 0;
   }
-  return contadorEsquina >= 1;
+  return contadorEsquina >= 3;
 }
 
 void actualizarGyro() {
@@ -366,6 +371,16 @@ void loop() {
     return;
   }
 
+  if (raceFinished) {
+    setMotor(0);
+    escribirServo(centroServo);
+    printDual(" | TERMINADO giros=12/12");
+    Serial.println(" ");
+    SerialBT.println(" ");
+    delay(20);
+    return;
+  }
+
   mpu.update();
   actualizarGyro();
 
@@ -379,7 +394,7 @@ void loop() {
   long distR = distR_filtrada;
 
   switch (estado) {
-    case SIGUIENDO:
+    case SIGUIENDO: {
       velocidadMotor = 180;
       controlPID(distL, distR);
 
@@ -396,6 +411,7 @@ void loop() {
         Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
       }
       break;
+    }
 
     case GIRANDO: {
       float delta = abs(anguloGyro);
@@ -429,7 +445,14 @@ void loop() {
         anguloObjetivo = anguloGyro;
         lastTurnTime = millis();
         estado = SIGUIENDO;
-        Serial.println("Giro completado");
+        turnsCompleted++;
+        if (turnsCompleted >= TURNS_PER_RACE) {
+          raceFinished = true;
+        }
+        Serial.print("Giro completado ");
+        Serial.print(turnsCompleted);
+        Serial.print("/");
+        Serial.println(TURNS_PER_RACE);
       }
 
       break;
@@ -454,6 +477,10 @@ void loop() {
   printDual(String(piPriority ? 1 : 0));
   printDual(" | mem:");
   printDual(String(piMemoryFrames));
+  printDual(" | giros:");
+  printDual(String(turnsCompleted));
+  printDual("/");
+  printDual(String(TURNS_PER_RACE));
   Serial.println(" ");
   SerialBT.println(" ");
 }

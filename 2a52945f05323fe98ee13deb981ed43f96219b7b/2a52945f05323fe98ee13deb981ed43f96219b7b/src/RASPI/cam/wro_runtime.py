@@ -147,8 +147,8 @@ class Config:
 	process_every_n: int = 2
 	threaded_capture: bool = True
 
-	red_target_px: int = 500
-	green_target_px: int = 140
+	red_target_px: int = 140
+	green_target_px: int = 500
 	neutral_x: int = 700
 
 	pid_kp: float = 0.012
@@ -313,13 +313,11 @@ class IntegratedRuntime:
 			x = red_x
 			error_px = float(self.cfg.red_target_px - x)
 			color = "Red"
-			sign = -1.0
 			mode = "avoid_red"
 		elif green_obj:
 			x = green_x
 			error_px = float(self.cfg.green_target_px - x)
 			color = "Green"
-			sign = +1.0
 			mode = "avoid_green"
 		else:
 			return {
@@ -346,14 +344,14 @@ class IntegratedRuntime:
 		self.obstaculo_clear_frames = 0
 		self.ultimo_color_obstaculo = color
 
-		norm = correction_px / max(1.0, self.cfg.correction_limit_px)
+		norm = -(correction_px / max(1.0, self.cfg.correction_limit_px))
 
 		return {
 			"detected": True,
 			"color": color,
 			"x": x,
 			"error_px": error_px,
-			"vision_error_norm": float(sign * abs(norm)),
+			"vision_error_norm": float(norm),
 			"mode": mode,
 			"priority": True,
 			"memory_frames": self.persistencia_obstaculo,
@@ -381,18 +379,13 @@ class IntegratedRuntime:
 		self.ultima_correccion_px = correction_px
 
 		if self.ultimo_color_obstaculo == "Red":
-			sign = -1.0
 			mode = "memory_red"
 		elif self.ultimo_color_obstaculo == "Green":
-			sign = +1.0
 			mode = "memory_green"
 		else:
-			sign = 0.0
 			mode = "memory_unknown"
 
-		norm = 0.0
-		if sign != 0.0:
-			norm = float(sign * abs(correction_px / max(1.0, self.cfg.correction_limit_px)))
+		norm = -(correction_px / max(1.0, self.cfg.correction_limit_px)) if self.ultimo_color_obstaculo else 0.0
 
 		return {
 			"detected": False,
