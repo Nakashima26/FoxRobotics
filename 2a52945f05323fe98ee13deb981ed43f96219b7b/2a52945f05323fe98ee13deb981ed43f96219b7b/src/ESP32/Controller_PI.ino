@@ -166,7 +166,7 @@ void parsePiMessage(String line) {
   if (line.startsWith("READY")) {
     piReady = true;
     lastPiMsgMs = millis();
-    Serial.println("ACK:READY");
+    Serial2.println("ACK:READY");
     return;
   }
 
@@ -215,7 +215,7 @@ void parsePiMessage(String line) {
 
     piReady = true;
     lastPiMsgMs = millis();
-    Serial.println("ACK:V1");
+    Serial2.println("ACK:V1");
     return;
   }
 
@@ -237,14 +237,14 @@ void parsePiMessage(String line) {
       obsBiasNorm = constrain(obsBiasNorm, -1.0, 1.0);
       piReady = true;
       lastPiMsgMs = millis();
-      Serial.println("ACK:X");
+      Serial2.println("ACK:X");
     }
   }
 }
 
 void readPiSerial() {
-  while (Serial.available() > 0) {
-    String line = Serial.readStringUntil('\n');
+  while (Serial2.available() > 0) {
+    String line = Serial2.readStringUntil('\n');
     if (line.length() > 0) {
       parsePiMessage(line);
     }
@@ -314,6 +314,7 @@ void controlPID(long distL, long distR) {
 
 void setup() {
   Serial.begin(115200);
+  Serial2.begin(115200, SERIAL_8N1, 17, 16);  // RX=17, TX=16
   SerialBT.begin("ESP32_Robot");
 
   Wire.begin();
