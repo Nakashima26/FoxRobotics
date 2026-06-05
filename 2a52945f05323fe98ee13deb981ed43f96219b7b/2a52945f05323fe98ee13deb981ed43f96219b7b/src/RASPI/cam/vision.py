@@ -3,24 +3,45 @@ import os
 import cv2
 import numpy as np
 
+
+cv2.setUseOptimized(True)
+cv2.setNumThreads(min(4, os.cpu_count() or 1))
+
+
+def open_camera(cam_index=0):
+    if os.name == "nt":
+        cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(cam_index)
+    else:
+        pipeline = (
+            "libcamerasrc ! queue max-size-buffers=1 leaky=downstream "
+            "! video/x-raw, width=1640, height=1232, framerate=30/1 "
+            "! videoconvert ! videoscale ! video/x-raw, width=640, height=480 "
+            "! appsink drop=true max-buffers=1 sync=false"
+        )
+        cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(cam_index)
+
+    if not cap.isOpened():
+        raise RuntimeError(
+            "No se pudo abrir la cámara. En PC usa una webcam conectada y verifica que otro programa no la esté usando."
+        )
+
+    try:
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    except Exception:
+        pass
+
+    return cap
+
+
 class Vision:
     def __init__(self, cam_index=0):
         """Inicializa la cámara y define los rangos de colores."""
-        self.cap = None
-
-        if os.name == "nt":
-            self.cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
-        else:
-            pipeline = "libcamerasrc ! video/x-raw, width=1640, height=1232, framerate=30/1 ! videoconvert ! videoscale ! video/x-raw, width=640, height=480 ! appsink drop=true sync=false"
-            self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-
-            if not self.cap.isOpened():
-                self.cap = cv2.VideoCapture(cam_index)
-
-        if not self.cap.isOpened():
-            raise RuntimeError(
-                "No se pudo abrir la cámara. En PC usa una webcam conectada y verifica que otro programa no la esté usando."
-            )
+        self.cap = open_camera(cam_index)
 
         self.color_ranges = {
             "Red": [(np.array([0, 150, 100]), np.array([10, 255, 255])),
