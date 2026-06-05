@@ -1,0 +1,17 @@
+[Unit]
+Description=FoxRobotics WRO runtime
+After=network-online.target dev-serial0.device
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/FoxRobotics
+ExecStart=/home/pi/FoxRobotics/.venv/bin/python /home/pi/FoxRobotics/src/RASPI/cam/wro_runtime.py --cam-index 0 --serial-port /dev/serial0 --baudrate 115200 --protocol signed --threaded-capture --record-orillas --record-output /home/pi/FoxRobotics/videos_orillas
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
