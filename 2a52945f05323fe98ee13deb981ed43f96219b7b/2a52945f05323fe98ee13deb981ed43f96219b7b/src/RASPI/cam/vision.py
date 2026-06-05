@@ -17,7 +17,7 @@ def open_camera(cam_index=0):
         pipeline = (
             "libcamerasrc ! queue max-size-buffers=1 leaky=downstream "
             "! video/x-raw, width=1640, height=1232, framerate=30/1 "
-            "! videoconvert ! videoscale ! video/x-raw, width=640, height=480 "
+            "! videoconvert ! videoscale ! video/x-raw, width=640, height=480, format=BGR "
             "! appsink drop=true max-buffers=1 sync=false"
         )
         cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
