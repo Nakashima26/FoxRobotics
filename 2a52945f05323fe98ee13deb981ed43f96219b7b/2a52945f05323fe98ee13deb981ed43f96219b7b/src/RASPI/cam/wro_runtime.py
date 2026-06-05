@@ -40,18 +40,24 @@ class ThreadedFrameGrabber:
 
 	def _run(self):
 		failures = 0
+		print("[CAM] Hilo de captura iniciado", flush=True)
 		while not self.stopped:
 			ret, frame = self.cap.read()
 			if not ret:
 				failures += 1
+				print(f"[CAM] cap.read() fallo #{failures}/100", flush=True)
 				if failures >= 100:
+					print("[CAM] Demasiados fallos, deteniendo hilo", flush=True)
 					self.stopped = True
 					break
 				time.sleep(0.05)
 				continue
+			if failures > 0:
+				print(f"[CAM] Frame recibido despues de {failures} fallos", flush=True)
 			failures = 0
 			with self.lock:
 				self.frame = frame
+		print("[CAM] Hilo de captura terminado", flush=True)
 
 	def read(self):
 		with self.lock:
@@ -455,8 +461,10 @@ class IntegratedRuntime:
 			y += 22
 
 	def start_capture(self):
+		print(f"[CAM] cap.isOpened()={self.vision.cap.isOpened()} threaded={self.cfg.threaded_capture}", flush=True)
 		if self.cfg.threaded_capture:
 			self.frame_grabber = ThreadedFrameGrabber(self.vision.cap).start()
+			print("[CAM] ThreadedFrameGrabber iniciado", flush=True)
 
 	def read_frame(self):
 		if self.frame_grabber is not None:
