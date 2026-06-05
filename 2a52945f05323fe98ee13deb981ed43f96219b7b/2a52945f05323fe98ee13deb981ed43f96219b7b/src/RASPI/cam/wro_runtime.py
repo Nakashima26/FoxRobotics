@@ -522,6 +522,11 @@ class IntegratedRuntime:
 					time.sleep(0.01)
 					continue
 
+				self.loop_count += 1
+				if self.loop_count % self.cfg.process_every_n != 0:
+					time.sleep(0.001)
+					continue
+
 				fps_count += 1
 				now = time.perf_counter()
 				elapsed = now - last_fps_time
@@ -529,11 +534,6 @@ class IntegratedRuntime:
 					fps = fps_count / elapsed
 					fps_count = 0
 					last_fps_time = now
-
-				self.loop_count += 1
-				if self.loop_count % self.cfg.process_every_n != 0:
-					time.sleep(0.001)
-					continue
 
 				processed_frame, positions = self.vision.process_frame(frame)
 				obs_now = self.obstacle_decision(positions, processed_frame.shape[1])
