@@ -42,9 +42,8 @@ Replace `COM5` with your ESP32 port.
 ### Autostart on Raspberry Pi
 
 ```bash
-cd ~/FoxRobotics
-chmod +x scripts/install_autostart_pi.sh
-./scripts/install_autostart_pi.sh
+chmod +x /home/pi/FoxRobotics/scripts/install_autostart_pi.sh
+/home/pi/FoxRobotics/scripts/install_autostart_pi.sh
 ```
 
 All artifacts required to resolve dependencies and build the project must be included in this directory as well.
