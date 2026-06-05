@@ -14,15 +14,7 @@ def open_camera(cam_index=0):
         if not cap.isOpened():
             cap = cv2.VideoCapture(cam_index)
     else:
-        # Intenta libcamerasrc (Raspberry Pi 4 con bullseye+)
-        pipeline = (
-            "libcamerasrc ! "
-            "video/x-raw, format=NV12, width=1640, height=1232 ! "
-            "videoconvert ! videoscale ! video/x-raw, width=640, height=480 ! "
-            "appsink"
-        )
-        cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-
+        cap = cv2.VideoCapture(cam_index, cv2.CAP_V4L2)
         if not cap.isOpened():
             cap = cv2.VideoCapture(cam_index)
 
