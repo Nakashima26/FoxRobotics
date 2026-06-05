@@ -136,7 +136,7 @@ def resolve_output_path(output_path: str | None) -> Path:
 @dataclass
 class Config:
 	cam_index: int = 0
-	serial_port: str = "/dev/ttyAMA0"
+	serial_port: str = "/dev/ttyS0"
 	baudrate: int = 115200
 	protocol: str = "signed"
 	show_window: bool = True
@@ -550,7 +550,7 @@ class IntegratedRuntime:
 def parse_args():
 	parser = argparse.ArgumentParser(description="Runtime integrado profesional para WRO Future Engineers.")
 	parser.add_argument("--cam-index", type=int, default=0)
-	parser.add_argument("--serial-port", type=str, default="/dev/ttyAMA0")
+	parser.add_argument("--serial-port", type=str, default="/dev/ttyS0")
 	parser.add_argument("--baudrate", type=int, default=115200)
 	parser.add_argument("--protocol", choices=["signed", "legacy_x"], default="signed")
 	parser.add_argument("--process-every", type=int, default=3)
