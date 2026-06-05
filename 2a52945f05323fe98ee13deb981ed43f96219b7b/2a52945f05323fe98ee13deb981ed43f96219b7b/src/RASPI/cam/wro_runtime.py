@@ -144,7 +144,7 @@ class Config:
 	baudrate: int = 115200
 	protocol: str = "signed"
 	show_window: bool = True
-	process_every_n: int = 2
+	process_every_n: int = 3
 	threaded_capture: bool = True
 
 	red_target_px: int = 140
@@ -535,7 +535,7 @@ def parse_args():
 	parser.add_argument("--serial-port", type=str, default="/dev/serial0")
 	parser.add_argument("--baudrate", type=int, default=115200)
 	parser.add_argument("--protocol", choices=["signed", "legacy_x"], default="signed")
-	parser.add_argument("--process-every", type=int, default=2)
+	parser.add_argument("--process-every", type=int, default=3)
 	parser.add_argument("--threaded-capture", action="store_true")
 	parser.add_argument("--no-threaded-capture", action="store_true")
 	parser.add_argument("--record-orillas", action="store_true")
