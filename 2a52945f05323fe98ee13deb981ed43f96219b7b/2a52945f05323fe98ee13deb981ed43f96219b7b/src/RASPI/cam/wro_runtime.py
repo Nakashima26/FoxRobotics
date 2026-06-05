@@ -39,11 +39,17 @@ class ThreadedFrameGrabber:
 		return self
 
 	def _run(self):
+		failures = 0
 		while not self.stopped:
 			ret, frame = self.cap.read()
 			if not ret:
-				self.stopped = True
-				break
+				failures += 1
+				if failures >= 100:
+					self.stopped = True
+					break
+				time.sleep(0.05)
+				continue
+			failures = 0
 			with self.lock:
 				self.frame = frame
 
