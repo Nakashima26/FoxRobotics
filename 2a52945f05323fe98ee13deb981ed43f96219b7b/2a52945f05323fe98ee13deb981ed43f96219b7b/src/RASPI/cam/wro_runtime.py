@@ -493,8 +493,8 @@ class IntegratedRuntime:
 		self.video_writer.write(frame.copy())
 
 	def run(self):
-		self.serial_link.open()
 		self.start_capture()
+		self.serial_link.open()
 		print("[INFO] Iniciando control WRO integrado. ESC para salir.", flush=True)
 
 		last_fps_time = time.perf_counter()
