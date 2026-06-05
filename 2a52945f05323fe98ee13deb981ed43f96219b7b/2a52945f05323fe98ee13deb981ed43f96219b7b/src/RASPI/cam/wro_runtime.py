@@ -237,65 +237,78 @@ class SerialLink:
 		self.port = port
 		self.baudrate = baudrate
 		self.fd = None
+		self._queue = Queue(maxsize=4)
+		self._last_rx = ""
+		self._thread = threading.Thread(target=self._run, daemon=True)
+		self._thread.start()
 
-	def open(self):
+	def _run(self):
+		print(f"[SERIAL] Thread iniciado, abriendo {self.port}...", flush=True)
 		try:
-			import os
 			import termios
-
 			self.fd = os.open(self.port, os.O_RDWR | os.O_NOCTTY)
-
 			attrs = termios.tcgetattr(self.fd)
 			attrs[2] &= ~(termios.CSTOPB | termios.CSIZE)
 			attrs[2] |= termios.CS8
 			attrs[6][termios.VMIN] = 0
 			attrs[6][termios.VTIME] = 2
 			attrs[4] = attrs[5] = termios.B115200
-
 			termios.tcsetattr(self.fd, termios.TCSANOW, attrs)
 			time.sleep(1.0)
-			print(f"[INFO] UART abierto en {self.port} @ {self.baudrate}", flush=True)
-			self.send_ready_burst()
+			print(f"[SERIAL] UART abierto en {self.port} @ {self.baudrate}", flush=True)
+			for _ in range(3):
+				os.write(self.fd, b"READY,pi=1\n")
+				time.sleep(0.06)
 		except Exception as exc:
 			self.fd = None
-			print(f"[WARN] No se pudo abrir UART ({self.port}): {exc}", flush=True)
-
-	def send_ready_burst(self):
-		if not self.fd:
+			print(f"[SERIAL] No se pudo abrir UART ({self.port}): {exc}", flush=True)
 			return
-		for _ in range(3):
+
+		while True:
 			try:
-				os.write(self.fd, b"READY,pi=1\n")
+				line = self._queue.get(timeout=0.1)
+			except Empty:
+				continue
+			if line is None:
+				break
+			try:
+				os.write(self.fd, f"{line}\n".encode("utf-8"))
+				print(f"[SERIAL] TX: {line}", flush=True)
+			except Exception as e:
+				print(f"[SERIAL] Error TX: {e}", flush=True)
+			try:
+				data = b""
+				while True:
+					chunk = os.read(self.fd, 1)
+					if not chunk or chunk == b"\n":
+						break
+					data += chunk
+				rx = data.decode("utf-8", errors="ignore").strip()
+				if rx:
+					self._last_rx = rx
+					print(f"[SERIAL] RX: {rx}", flush=True)
 			except Exception:
-				return
-			time.sleep(0.06)
+				pass
+
+	def open(self):
+		pass
 
 	def send_line(self, line: str):
-		if not self.fd:
-			return
 		try:
-			payload = f"{line}\n".encode("utf-8")
-			os.write(self.fd, payload)
-		except Exception:
+			self._queue.put_nowait(line)
+		except Full:
 			pass
 
 	def try_readline(self):
-		if not self.fd:
-			return ""
-		try:
-			data = b""
-			while True:
-				chunk = os.read(self.fd, 1)
-				if not chunk:
-					break
-				if chunk == b"\n":
-					break
-				data += chunk
-			return data.decode("utf-8", errors="ignore").strip()
-		except Exception:
-			return ""
+		rx = self._last_rx
+		self._last_rx = ""
+		return rx
 
 	def close(self):
+		try:
+			self._queue.put_nowait(None)
+		except Full:
+			pass
 		if self.fd is not None:
 			try:
 				os.close(self.fd)
@@ -493,8 +506,8 @@ class IntegratedRuntime:
 		self.video_writer.write(frame.copy())
 
 	def run(self):
-		self.start_capture()
 		self.serial_link.open()
+		self.start_capture()
 		print("[INFO] Iniciando control WRO integrado. ESC para salir.", flush=True)
 
 		last_fps_time = time.perf_counter()
