@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+import traceback
 import websockets
 import mss
 from PIL import Image
@@ -34,6 +35,11 @@ KEY_MAP = {
     "PageUp": "Prior", "PageDown": "Next",
     "F1": "F1", "F2": "F2", "F3": "F3", "F4": "F4",
 }
+
+print(f"[client] DISPLAY={os.environ.get('DISPLAY', 'NO SETEADO')}")
+print(f"[client] XAUTHORITY={os.environ.get('XAUTHORITY', 'NO SETEADO')}")
+print(f"[client] USER={os.environ.get('USER', os.environ.get('LOGNAME', '?'))}")
+print(f"[client] REMOTE_SERVER={SERVER_URL}")
 
 
 def execute_command(cmd: dict):
@@ -60,23 +66,36 @@ def execute_command(cmd: dict):
 
 async def stream_screen(ws):
     interval = 1.0 / FPS
-    print(f"[client] Abriendo display con mss...")
-    with mss.MSS() as sct:
-        print(f"[client] Monitores detectados: {sct.monitors}")
-        monitor = sct.monitors[1]
-        print(f"[client] Usando monitor: {monitor}")
-        frame_count = 0
-        while True:
-            shot = sct.grab(monitor)
-            img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-            img = img.resize(FRAME_SIZE, Image.LANCZOS)
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=JPEG_QUALITY)
-            await ws.send(buf.getvalue())
-            frame_count += 1
-            if frame_count % 30 == 0:
-                print(f"[client] {frame_count} frames enviados")
-            await asyncio.sleep(interval)
+    print("[client] Abriendo mss...")
+    try:
+        with mss.MSS() as sct:
+            print(f"[client] Monitores: {sct.monitors}")
+            if len(sct.monitors) < 2:
+                print("[client] ERROR: no se detectó ningún monitor, revisa DISPLAY y XAUTHORITY")
+                return
+            monitor = sct.monitors[1]
+            print(f"[client] Monitor activo: {monitor}")
+            frame_count = 0
+            while True:
+                try:
+                    shot = sct.grab(monitor)
+                    img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+                    img = img.resize(FRAME_SIZE, Image.LANCZOS)
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=JPEG_QUALITY)
+                    await ws.send(buf.getvalue())
+                    frame_count += 1
+                    if frame_count % 30 == 0:
+                        print(f"[client] {frame_count} frames enviados")
+                except Exception as e:
+                    print(f"[client] Error capturando frame: {e}")
+                    traceback.print_exc()
+                    raise
+                await asyncio.sleep(interval)
+    except Exception as e:
+        print(f"[client] Error fatal en stream_screen: {e}")
+        traceback.print_exc()
+        raise
 
 
 async def handle_commands(ws):
@@ -94,10 +113,11 @@ async def main():
     while True:
         try:
             async with websockets.connect(url, ping_interval=20) as ws:
-                print("[client] Conectado")
+                print("[client] Conectado al servidor")
                 await asyncio.gather(stream_screen(ws), handle_commands(ws))
         except Exception as e:
             print(f"[client] Desconectado: {e}. Reintentando en 5s...")
+            traceback.print_exc()
             await asyncio.sleep(5)
 
 

@@ -8,6 +8,7 @@ Type=simple
 User=user
 Environment=REMOTE_SERVER=ws://100.74.214.4:8765
 Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/user/.Xauthority
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/user/FoxRobotics/.venv/bin/python /home/user/FoxRobotics/remote/client.py
 Restart=always

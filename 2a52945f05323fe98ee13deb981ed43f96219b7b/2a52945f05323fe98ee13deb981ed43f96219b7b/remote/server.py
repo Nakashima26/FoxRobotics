@@ -112,7 +112,7 @@ async def pi_endpoint(ws: WebSocket):
                     except Exception:
                         dead.add(viewer)
                 viewer_connections.difference_update(dead)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         print("[server] Pi desconectada")
         pi_ws = None
 
@@ -128,7 +128,7 @@ async def viewer_endpoint(ws: WebSocket):
             msg = await ws.receive_text()
             if pi_ws:
                 await pi_ws.send_text(msg)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         viewer_connections.discard(ws)
 
 
