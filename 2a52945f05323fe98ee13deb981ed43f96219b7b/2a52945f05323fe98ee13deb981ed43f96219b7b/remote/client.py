@@ -60,8 +60,12 @@ def execute_command(cmd: dict):
 
 async def stream_screen(ws):
     interval = 1.0 / FPS
-    with mss.mss() as sct:
+    print(f"[client] Abriendo display con mss...")
+    with mss.MSS() as sct:
+        print(f"[client] Monitores detectados: {sct.monitors}")
         monitor = sct.monitors[1]
+        print(f"[client] Usando monitor: {monitor}")
+        frame_count = 0
         while True:
             shot = sct.grab(monitor)
             img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
@@ -69,6 +73,9 @@ async def stream_screen(ws):
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=JPEG_QUALITY)
             await ws.send(buf.getvalue())
+            frame_count += 1
+            if frame_count % 30 == 0:
+                print(f"[client] {frame_count} frames enviados")
             await asyncio.sleep(interval)
 
 

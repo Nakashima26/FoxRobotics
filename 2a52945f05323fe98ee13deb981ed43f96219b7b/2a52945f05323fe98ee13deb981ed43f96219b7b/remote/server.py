@@ -111,7 +111,7 @@ async def pi_endpoint(ws: WebSocket):
                         await viewer.send_bytes(frame_data)
                     except Exception:
                         dead.add(viewer)
-                viewer_connections -= dead
+                viewer_connections.difference_update(dead)
     except WebSocketDisconnect:
         print("[server] Pi desconectada")
         pi_ws = None
