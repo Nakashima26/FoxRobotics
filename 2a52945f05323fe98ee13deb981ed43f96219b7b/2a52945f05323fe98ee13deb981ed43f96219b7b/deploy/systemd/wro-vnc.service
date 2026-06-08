@@ -7,7 +7,7 @@ Wants=network-online.target graphical-session.target
 Type=simple
 User=pi
 # Cambiar la IP por la de tu computadora
-Environment=REMOTE_SERVER=ws://192.168.1.100:8765
+Environment=REMOTE_SERVER=ws://100.74.214.4:8765
 Environment=DISPLAY=:0
 ExecStart=/home/pi/FoxRobotics/.venv/bin/python /home/pi/FoxRobotics/remote/client.py
 Restart=always
