@@ -1,0 +1,19 @@
+[Unit]
+Description=FoxRobotics Remote Desktop Client
+After=network-online.target graphical-session.target
+Wants=network-online.target graphical-session.target
+
+[Service]
+Type=simple
+User=pi
+# Cambiar la IP por la de tu computadora
+Environment=REMOTE_SERVER=ws://192.168.1.100:8765
+Environment=DISPLAY=:0
+ExecStart=/home/pi/FoxRobotics/.venv/bin/python /home/pi/FoxRobotics/remote/client.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target
