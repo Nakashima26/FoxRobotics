@@ -42,7 +42,7 @@ print(f"[client] USER={os.environ.get('USER', os.environ.get('LOGNAME', '?'))}")
 print(f"[client] REMOTE_SERVER={SERVER_URL}")
 
 
-screen_w, screen_h = 1920, 1080
+screen_w, screen_h = 1024, 768
 
 
 def scale(x, y):
@@ -69,7 +69,7 @@ def execute_command(cmd: dict):
         )
     elif t == "key":
         key = cmd.get("key", "")
-        xkey = KEY_MAP.get(key, key) if len(key) > 1 else key
+        xkey = KEY_MAP.get(key, key)
         subprocess.run(["xdotool", "key", xkey], check=False, capture_output=True)
 
 
