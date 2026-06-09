@@ -23,7 +23,7 @@ import websockets
 import mss
 from PIL import Image
 
-SERVER_URL = os.environ.get("REMOTE_SERVER", "ws://192.168.1.100:8765")
+SERVER_URL = os.environ.get("REMOTE_SERVER", "ws://100.80.180.4:8765")
 FPS = 15
 JPEG_QUALITY = 70
 FRAME_SIZE = (1280, 720)
