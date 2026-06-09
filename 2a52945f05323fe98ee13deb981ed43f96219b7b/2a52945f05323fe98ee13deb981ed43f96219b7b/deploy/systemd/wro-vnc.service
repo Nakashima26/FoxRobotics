@@ -6,7 +6,7 @@ Wants=network-online.target graphical-session.target
 [Service]
 Type=simple
 User=user
-Environment=REMOTE_SERVER=ws://100.74.214.4:8765
+Environment=REMOTE_SERVER=ws://100.80.180.4:8765
 Environment=DISPLAY=:0
 Environment=XAUTHORITY=/home/user/.Xauthority
 Environment=PYTHONUNBUFFERED=1
