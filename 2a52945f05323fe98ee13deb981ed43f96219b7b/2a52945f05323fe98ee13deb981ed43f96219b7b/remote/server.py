@@ -85,14 +85,25 @@ HTML = """<!DOCTYPE html>
 
     document.addEventListener('keydown', (e) => {
       if (document.activeElement === document.body || document.activeElement === img) {
-        e.preventDefault();
-        if (ws.readyState === 1) ws.send(JSON.stringify({
-          type: 'key', 
-          key: e.key,
-          shift: e.shiftKey,
-          ctrl: e.ctrlKey,
-          alt: e.altKey
-        }));
+        // Capturar Ctrl+V para portapapeles
+        if (e.ctrlKey && e.key === 'v') {
+          e.preventDefault();
+          navigator.clipboard.readText().then(text => {
+            if (ws.readyState === 1) ws.send(JSON.stringify({
+              type: 'clipboard',
+              text: text
+            }));
+          }).catch(() => console.log("Portapapeles no disponible"));
+        } else {
+          e.preventDefault();
+          if (ws.readyState === 1) ws.send(JSON.stringify({
+            type: 'key', 
+            key: e.key,
+            shift: e.shiftKey,
+            ctrl: e.ctrlKey,
+            alt: e.altKey
+          }));
+        }
       }
     });
   </script>

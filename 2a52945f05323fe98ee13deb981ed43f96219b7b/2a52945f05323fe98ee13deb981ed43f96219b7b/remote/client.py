@@ -97,6 +97,20 @@ def execute_command(cmd: dict):
             # Para caracteres normales, usar 'type' (maneja @, #, !, etc.)
             # Nota: type no soporta bien modificadores, pero rara vez se necesita
             subprocess.run(["xdotool", "type", key], check=False, capture_output=True)
+    elif t == "clipboard":
+        text = cmd.get("text", "")
+        try:
+            # Escribir en el portapapeles de la Pi usando xclip
+            process = subprocess.Popen(
+                ["xclip", "-selection", "clipboard"],
+                stdin=subprocess.PIPE,
+                check=False
+            )
+            process.communicate(input=text.encode('utf-8'))
+            # Simular Ctrl+V para pegar
+            subprocess.run(["xdotool", "key", "ctrl+v"], check=False, capture_output=True)
+        except Exception as e:
+            print(f"[client] Error al pegar desde portapapeles: {e}")
 
 
 def get_cam_overlay():
