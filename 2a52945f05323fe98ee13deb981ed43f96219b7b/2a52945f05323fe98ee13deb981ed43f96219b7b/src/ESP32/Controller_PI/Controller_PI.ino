@@ -272,6 +272,26 @@ void setup() {
   lastPIDTime = millis();
   lastGyroTime = millis();
   anguloObjetivo = 0;
+  // Esperar mensaje "READY" desde la Raspberry Pi por Serial antes de arrancar
+  Serial.println("Esperando READY desde Pi...");
+  bool piReady = false;
+  unsigned long waitStart = millis();
+  const unsigned long waitTimeout = 30000; // timeout 30s
+  while (!piReady && (millis() - waitStart < waitTimeout)) {
+    if (Serial.available()) {
+      String line = Serial.readStringUntil('\n');
+      line.trim();
+      if (line.indexOf("READY") >= 0) {
+        piReady = true;
+        Serial.println("Recibido READY. Iniciando sistema.");
+        break;
+      }
+    }
+    delay(50);
+  }
+  if (!piReady) {
+    Serial.println("Timeout esperando READY; continuando sin señal Pi.");
+  }
   Serial.println("Sistema listo");
 }
 
