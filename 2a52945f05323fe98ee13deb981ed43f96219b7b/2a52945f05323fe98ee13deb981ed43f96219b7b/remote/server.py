@@ -9,6 +9,7 @@ Uso:
 Luego abre: http://localhost:8765
 """
 import asyncio
+import json
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 import uvicorn
@@ -65,7 +66,11 @@ HTML = """<!DOCTYPE html>
       };
     }
 
+    let lastMove = 0;
     img.addEventListener('mousemove', (e) => {
+      const now = Date.now();
+      if (now - lastMove < 50) return;
+      lastMove = now;
       const {x, y} = imgCoords(e);
       if (ws.readyState === 1) ws.send(JSON.stringify({type: 'mousemove', x, y}));
     });
@@ -99,12 +104,16 @@ async def pi_endpoint(ws: WebSocket):
     global pi_ws, frame_data
     await ws.accept()
     pi_ws = ws
+    frames_received = 0
     print("[server] Pi conectada")
     try:
         while True:
             msg = await ws.receive()
             if "bytes" in msg:
                 frame_data = msg["bytes"]
+                frames_received += 1
+                if frames_received % 30 == 0:
+                    print(f"[server] {frames_received} frames recibidos, {len(frame_data)} bytes, viewers: {len(viewer_connections)}")
                 dead = set()
                 for viewer in viewer_connections:
                     try:
@@ -126,6 +135,12 @@ async def viewer_endpoint(ws: WebSocket):
     try:
         while True:
             msg = await ws.receive_text()
+            try:
+                cmd = json.loads(msg)
+                if cmd.get("type") != "mousemove":
+                    print(f"[server] cmd → Pi: {cmd}")
+            except Exception:
+                pass
             if pi_ws:
                 await pi_ws.send_text(msg)
     except (WebSocketDisconnect, RuntimeError):

@@ -70,10 +70,7 @@ async def stream_screen(ws):
     try:
         with mss.MSS() as sct:
             print(f"[client] Monitores: {sct.monitors}")
-            if len(sct.monitors) < 2:
-                print("[client] ERROR: no se detectó ningún monitor, revisa DISPLAY y XAUTHORITY")
-                return
-            monitor = sct.monitors[1]
+            monitor = sct.monitors[0]
             print(f"[client] Monitor activo: {monitor}")
             frame_count = 0
             while True:
@@ -102,7 +99,10 @@ async def handle_commands(ws):
     async for msg in ws:
         if isinstance(msg, str):
             try:
-                execute_command(json.loads(msg))
+                cmd = json.loads(msg)
+                if cmd.get("type") != "mousemove":
+                    print(f"[client] cmd recibido: {cmd}")
+                execute_command(cmd)
             except Exception as e:
                 print(f"[client] Error ejecutando comando: {e}")
 
