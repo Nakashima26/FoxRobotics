@@ -99,6 +99,7 @@ def execute_command(cmd: dict):
             subprocess.run(["xdotool", "type", key], check=False, capture_output=True)
     elif t == "clipboard":
         text = cmd.get("text", "")
+        print(f"[client] Recibido evento clipboard: {text[:50]}...")
         try:
             # Escribir en el portapapeles de la Pi usando xclip
             process = subprocess.Popen(
@@ -107,10 +108,13 @@ def execute_command(cmd: dict):
                 check=False
             )
             process.communicate(input=text.encode('utf-8'))
+            print("[client] Texto copiado a portapapeles de Pi")
             # Simular Ctrl+V para pegar
             subprocess.run(["xdotool", "key", "ctrl+v"], check=False, capture_output=True)
+            print("[client] Ctrl+V ejecutado")
         except Exception as e:
             print(f"[client] Error al pegar desde portapapeles: {e}")
+            traceback.print_exc()
 
 
 def get_cam_overlay():
