@@ -86,6 +86,9 @@ def execute_command(cmd: dict):
         if shift:
             modifiers.append("shift")
         
+        # Enfocar la ventana activa primero
+        subprocess.run(["xdotool", "getactivewindow", "windowactivate"], check=False, capture_output=True)
+        
         # Si tiene modificadores, usar 'key' (para Ctrl+C, Alt+Tab, etc.)
         if modifiers:
             xdotool_cmd = modifiers + [xkey]
@@ -101,21 +104,15 @@ def execute_command(cmd: dict):
             subprocess.run(["xdotool", "type", key], check=False, capture_output=True)
     elif t == "clipboard":
         text = cmd.get("text", "")
-        print(f"[client] Recibido evento clipboard: {text[:50]}...")
+        print(f"[client] Recibido clipboard: {len(text)} caracteres")
         try:
-            # Escribir en el portapapeles de la Pi usando xclip
-            process = subprocess.Popen(
-                ["xclip", "-selection", "clipboard"],
-                stdin=subprocess.PIPE,
-                check=False
-            )
-            process.communicate(input=text.encode('utf-8'))
-            print("[client] Texto copiado a portapapeles de Pi")
-            # Simular Ctrl+V para pegar
-            subprocess.run(["xdotool", "key", "ctrl+v"], check=False, capture_output=True)
-            print("[client] Ctrl+V ejecutado")
+            # Enviar carácter por carácter usando xdotool type
+            # Esto es más confiable que intentar usar el portapapeles del sistema
+            if text:
+                subprocess.run(["xdotool", "type", text], check=False, capture_output=True)
+                print(f"[client] Texto pegado exitosamente")
         except Exception as e:
-            print(f"[client] Error al pegar desde portapapeles: {e}")
+            print(f"[client] Error al pegar: {e}")
             traceback.print_exc()
 
 

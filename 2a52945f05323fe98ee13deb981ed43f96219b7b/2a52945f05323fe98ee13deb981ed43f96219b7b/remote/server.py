@@ -31,7 +31,11 @@ HTML = """<!DOCTYPE html>
            padding: 4px 12px; display: flex; gap: 16px; align-items: center; }
     #dot { width: 8px; height: 8px; border-radius: 50%; background: #555; }
     #dot.on { background: #4f4; }
+    #clipboard-area { position: absolute; top: -9999px; width: 1px; height: 1px; }
     #screen { max-width: 100%; max-height: calc(100vh - 28px); object-fit: contain; cursor: crosshair; display: block; }
+    #paste-hint { position: fixed; bottom: 10px; right: 10px; background: #333; color: #aaa; padding: 8px 12px;
+                  border-radius: 4px; font-size: 12px; font-family: monospace; cursor: pointer; border: 1px solid #555; }
+    #paste-hint:hover { background: #444; color: #fff; }
   </style>
 </head>
 <body>
@@ -40,10 +44,13 @@ HTML = """<!DOCTYPE html>
     <span id="status">Esperando Pi...</span>
   </div>
   <img id="screen" />
+  <textarea id="clipboard-area" placeholder="Pega aquí y presiona Ctrl+Shift+V"></textarea>
+  <div id="paste-hint">Ctrl+Shift+V para pegar</div>
   <script>
     const img = document.getElementById('screen');
     const status = document.getElementById('status');
     const dot = document.getElementById('dot');
+    const clipboardArea = document.getElementById('clipboard-area');
     const ws = new WebSocket(`ws://${location.host}/ws/viewer`);
     ws.binaryType = 'arraybuffer';
 
@@ -85,59 +92,53 @@ HTML = """<!DOCTYPE html>
 
     document.addEventListener('keydown', (e) => {
       if (document.activeElement === document.body || document.activeElement === img) {
-        // Ignorar teclas modificadoras solas (Control, Shift, Alt, Meta)
+        // Ignorar teclas modificadoras solas
         const modifierKeys = ['Control', 'Shift', 'Alt', 'Meta'];
         if (modifierKeys.includes(e.key)) {
-          return; // No enviar evento
+          return;
         }
         
         e.preventDefault();
         
-        // Capturar Ctrl+V para portapapeles
-        if (e.ctrlKey && (e.key === 'v' || e.key === 'V')) {
-          console.log("[browser] Ctrl+V detectado, leyendo portapapeles...");
-          navigator.clipboard.readText().then(text => {
-            console.log("[browser] Portapapeles leído:", text.substring(0, 50));
-            if (ws.readyState === 1) {
-              ws.send(JSON.stringify({
-                type: 'clipboard',
-                text: text
-              }));
-              console.log("[browser] Clipboard enviado");
-            }
-          }).catch(err => {
-            console.log("[browser] Error al leer portapapeles:", err);
-            // Si falla, enviar Ctrl+V como atajo de teclado
-            if (ws.readyState === 1) ws.send(JSON.stringify({
-              type: 'key', 
-              key: e.key,
-              shift: e.shiftKey,
-              ctrl: e.ctrlKey,
-              alt: e.altKey
-            }));
-          });
-        } else if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
-          // Ctrl+C
-          console.log("[browser] Ctrl+C detectado");
-          if (ws.readyState === 1) ws.send(JSON.stringify({
-            type: 'key', 
-            key: e.key,
-            shift: e.shiftKey,
-            ctrl: true,
-            alt: e.altKey
-          }));
-        } else {
-          // Tecla normal o combinación
-          if (ws.readyState === 1) ws.send(JSON.stringify({
-            type: 'key', 
-            key: e.key,
-            shift: e.shiftKey,
-            ctrl: e.ctrlKey,
-            alt: e.altKey
-          }));
+        // Ctrl+Shift+V para pegar desde el campo de texto
+        if (e.ctrlKey && e.shiftKey && (e.key === 'v' || e.key === 'V')) {
+          console.log("[browser] Ctrl+Shift+V detectado, enfocando campo de paste...");
+          clipboardArea.value = '';
+          clipboardArea.focus();
+          clipboardArea.select();
+          return;
         }
+        
+        if (ws.readyState === 1) ws.send(JSON.stringify({
+          type: 'key', 
+          key: e.key,
+          shift: e.shiftKey,
+          ctrl: e.ctrlKey,
+          alt: e.altKey
+        }));
       }
     });
+
+    // Cuando pegues en el campo de texto
+    clipboardArea.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const text = (e.clipboardData || window.clipboardData).getData('text');
+      console.log("[browser] Texto pegado en field, enviando:", text.substring(0, 50));
+      
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({
+          type: 'clipboard',
+          text: text
+        }));
+      }
+      
+      // Volver al foco de la imagen
+      img.focus();
+      clipboardArea.value = '';
+    });
+
+    // Enfocar la imagen por defecto
+    img.focus();
   </script>
 </body>
 </html>"""
