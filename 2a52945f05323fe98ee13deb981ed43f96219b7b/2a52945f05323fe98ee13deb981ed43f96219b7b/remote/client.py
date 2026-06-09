@@ -42,16 +42,25 @@ print(f"[client] USER={os.environ.get('USER', os.environ.get('LOGNAME', '?'))}")
 print(f"[client] REMOTE_SERVER={SERVER_URL}")
 
 
+screen_w, screen_h = 1920, 1080
+
+
+def scale(x, y):
+    return round(x * screen_w / FRAME_SIZE[0]), round(y * screen_h / FRAME_SIZE[1])
+
+
 def execute_command(cmd: dict):
     t = cmd.get("type")
     if t == "mousemove":
+        sx, sy = scale(cmd["x"], cmd["y"])
         subprocess.run(
-            ["xdotool", "mousemove", "--sync", str(cmd["x"]), str(cmd["y"])],
+            ["xdotool", "mousemove", "--sync", str(sx), str(sy)],
             check=False, capture_output=True,
         )
     elif t == "click":
+        sx, sy = scale(cmd["x"], cmd["y"])
         subprocess.run(
-            ["xdotool", "mousemove", str(cmd["x"]), str(cmd["y"])],
+            ["xdotool", "mousemove", str(sx), str(sy)],
             check=False, capture_output=True,
         )
         subprocess.run(
@@ -72,6 +81,10 @@ async def stream_screen(ws):
             print(f"[client] Monitores: {sct.monitors}")
             monitor = sct.monitors[0]
             print(f"[client] Monitor activo: {monitor}")
+            global screen_w, screen_h
+            screen_w = monitor["width"]
+            screen_h = monitor["height"]
+            print(f"[client] Resolución real: {screen_w}x{screen_h}")
             frame_count = 0
             while True:
                 try:
