@@ -24,6 +24,7 @@ from vision import Vision
 WOOD_LOWER = np.array([5, 25, 40])
 WOOD_UPPER = np.array([35, 180, 255])
 OUTPUT_PATTERN = re.compile(r"^orillas(\d+)\.mp4$")
+CAM_FRAME_PATH = "/tmp/wro_cam_frame.jpg"
 
 
 class ThreadedFrameGrabber:
@@ -506,6 +507,14 @@ class IntegratedRuntime:
 
 		self.video_writer.write(frame.copy())
 
+	def _write_cam_frame(self, frame):
+		try:
+			_, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
+			with open(CAM_FRAME_PATH, "wb") as f:
+				f.write(buf.tobytes())
+		except Exception:
+			pass
+
 	def run(self, on_ready=None):
 		self.serial_link.open()
 		self.start_capture()
@@ -579,6 +588,7 @@ class IntegratedRuntime:
 						break
 
 				self.maybe_record_frame(processed_frame, fps)
+				self._write_cam_frame(processed_frame)
 
 		finally:
 			if self.frame_grabber is not None:

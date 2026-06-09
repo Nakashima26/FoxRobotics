@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import traceback
 import websockets
 import mss
@@ -26,6 +27,8 @@ SERVER_URL = os.environ.get("REMOTE_SERVER", "ws://192.168.1.100:8765")
 FPS = 15
 JPEG_QUALITY = 70
 FRAME_SIZE = (1280, 720)
+CAM_FRAME_PATH = "/tmp/wro_cam_frame.jpg"
+CAM_FRAME_MAX_AGE = 2.0
 
 KEY_MAP = {
     "Enter": "Return", "Backspace": "BackSpace", "Escape": "Escape",
@@ -73,6 +76,18 @@ def execute_command(cmd: dict):
         subprocess.run(["xdotool", "key", xkey], check=False, capture_output=True)
 
 
+def get_cam_overlay():
+    try:
+        if time.time() - os.path.getmtime(CAM_FRAME_PATH) > CAM_FRAME_MAX_AGE:
+            return None
+        with open(CAM_FRAME_PATH, "rb") as f:
+            data = f.read()
+        cam_img = Image.open(io.BytesIO(data)).convert("RGB")
+        return cam_img.resize((FRAME_SIZE[0] // 4, FRAME_SIZE[1] // 4), Image.LANCZOS)
+    except Exception:
+        return None
+
+
 async def stream_screen(ws):
     interval = 1.0 / FPS
     print("[client] Abriendo mss...")
@@ -91,6 +106,9 @@ async def stream_screen(ws):
                     shot = sct.grab(monitor)
                     img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
                     img = img.resize(FRAME_SIZE, Image.LANCZOS)
+                    cam = get_cam_overlay()
+                    if cam:
+                        img.paste(cam, (FRAME_SIZE[0] - cam.width - 4, FRAME_SIZE[1] - cam.height - 4))
                     buf = io.BytesIO()
                     img.save(buf, format="JPEG", quality=JPEG_QUALITY)
                     await ws.send(buf.getvalue())

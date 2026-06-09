@@ -6,10 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=user
-Environment=DISPLAY=:0
-Environment=XAUTHORITY=/home/user/.Xauthority
 WorkingDirectory=/home/user/FoxRobotics
-ExecStart=/home/user/FoxRobotics/.venv/bin/python /home/user/FoxRobotics/src/RASPI/cam/wro_runtime.py --cam-index 0 --serial-port /dev/serial0 --baudrate 115200 --protocol signed --threaded-capture --record-orillas --record-output /home/user/FoxRobotics/videos_orillas
+ExecStart=/home/user/FoxRobotics/.venv/bin/python /home/user/FoxRobotics/src/RASPI/cam/wro_runtime.py --cam-index 0 --serial-port /dev/serial0 --baudrate 115200 --protocol signed --threaded-capture --record-orillas --record-output /home/user/FoxRobotics/videos_orillas --no-window
 Restart=always
 RestartSec=2
 StandardOutput=journal
