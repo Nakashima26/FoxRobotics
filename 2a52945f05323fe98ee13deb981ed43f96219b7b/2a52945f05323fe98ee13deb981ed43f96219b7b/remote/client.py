@@ -72,8 +72,31 @@ def execute_command(cmd: dict):
         )
     elif t == "key":
         key = cmd.get("key", "")
+        shift = cmd.get("shift", False)
+        ctrl = cmd.get("ctrl", False)
+        alt = cmd.get("alt", False)
         xkey = KEY_MAP.get(key, key)
-        subprocess.run(["xdotool", "key", xkey], check=False, capture_output=True)
+        
+        # Construir modificadores para xdotool
+        modifiers = []
+        if ctrl:
+            modifiers.append("ctrl")
+        if alt:
+            modifiers.append("alt")
+        if shift:
+            modifiers.append("shift")
+        
+        # Si es una tecla especial (en KEY_MAP o tiene nombre largo), usar 'key'
+        if key in KEY_MAP or len(key) > 1:
+            if modifiers:
+                xdotool_cmd = modifiers + [xkey]
+                subprocess.run(["xdotool", "key"] + xdotool_cmd, check=False, capture_output=True)
+            else:
+                subprocess.run(["xdotool", "key", xkey], check=False, capture_output=True)
+        else:
+            # Para caracteres normales, usar 'type' (maneja @, #, !, etc.)
+            # Nota: type no soporta bien modificadores, pero rara vez se necesita
+            subprocess.run(["xdotool", "type", key], check=False, capture_output=True)
 
 
 def get_cam_overlay():

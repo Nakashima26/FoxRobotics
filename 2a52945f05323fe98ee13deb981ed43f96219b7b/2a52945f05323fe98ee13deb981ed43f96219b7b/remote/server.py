@@ -86,7 +86,13 @@ HTML = """<!DOCTYPE html>
     document.addEventListener('keydown', (e) => {
       if (document.activeElement === document.body || document.activeElement === img) {
         e.preventDefault();
-        if (ws.readyState === 1) ws.send(JSON.stringify({type: 'key', key: e.key}));
+        if (ws.readyState === 1) ws.send(JSON.stringify({
+          type: 'key', 
+          key: e.key,
+          shift: e.shiftKey,
+          ctrl: e.ctrlKey,
+          alt: e.altKey
+        }));
       }
     });
   </script>
