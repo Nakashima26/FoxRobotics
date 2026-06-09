@@ -86,16 +86,18 @@ def execute_command(cmd: dict):
         if shift:
             modifiers.append("shift")
         
+        # Si tiene modificadores, usar 'key' (para Ctrl+C, Alt+Tab, etc.)
+        if modifiers:
+            xdotool_cmd = modifiers + [xkey]
+            print(f"[client] Ejecutando: xdotool key {' '.join(xdotool_cmd)}")
+            subprocess.run(["xdotool", "key"] + xdotool_cmd, check=False, capture_output=True)
         # Si es una tecla especial (en KEY_MAP o tiene nombre largo), usar 'key'
-        if key in KEY_MAP or len(key) > 1:
-            if modifiers:
-                xdotool_cmd = modifiers + [xkey]
-                subprocess.run(["xdotool", "key"] + xdotool_cmd, check=False, capture_output=True)
-            else:
-                subprocess.run(["xdotool", "key", xkey], check=False, capture_output=True)
+        elif key in KEY_MAP or len(key) > 1:
+            print(f"[client] Ejecutando: xdotool key {xkey}")
+            subprocess.run(["xdotool", "key", xkey], check=False, capture_output=True)
         else:
             # Para caracteres normales, usar 'type' (maneja @, #, !, etc.)
-            # Nota: type no soporta bien modificadores, pero rara vez se necesita
+            print(f"[client] Ejecutando: xdotool type '{key}'")
             subprocess.run(["xdotool", "type", key], check=False, capture_output=True)
     elif t == "clipboard":
         text = cmd.get("text", "")

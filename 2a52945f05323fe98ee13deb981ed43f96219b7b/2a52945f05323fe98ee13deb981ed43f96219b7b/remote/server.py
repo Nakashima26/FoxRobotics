@@ -85,9 +85,16 @@ HTML = """<!DOCTYPE html>
 
     document.addEventListener('keydown', (e) => {
       if (document.activeElement === document.body || document.activeElement === img) {
+        // Ignorar teclas modificadoras solas (Control, Shift, Alt, Meta)
+        const modifierKeys = ['Control', 'Shift', 'Alt', 'Meta'];
+        if (modifierKeys.includes(e.key)) {
+          return; // No enviar evento
+        }
+        
+        e.preventDefault();
+        
         // Capturar Ctrl+V para portapapeles
         if (e.ctrlKey && (e.key === 'v' || e.key === 'V')) {
-          e.preventDefault();
           console.log("[browser] Ctrl+V detectado, leyendo portapapeles...");
           navigator.clipboard.readText().then(text => {
             console.log("[browser] Portapapeles leído:", text.substring(0, 50));
@@ -96,11 +103,11 @@ HTML = """<!DOCTYPE html>
                 type: 'clipboard',
                 text: text
               }));
-              console.log("[browser] Clipboard enviado al servidor");
+              console.log("[browser] Clipboard enviado");
             }
           }).catch(err => {
             console.log("[browser] Error al leer portapapeles:", err);
-            // Si falla, enviar como tecla normal
+            // Si falla, enviar Ctrl+V como atajo de teclado
             if (ws.readyState === 1) ws.send(JSON.stringify({
               type: 'key', 
               key: e.key,
@@ -109,8 +116,18 @@ HTML = """<!DOCTYPE html>
               alt: e.altKey
             }));
           });
+        } else if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+          // Ctrl+C
+          console.log("[browser] Ctrl+C detectado");
+          if (ws.readyState === 1) ws.send(JSON.stringify({
+            type: 'key', 
+            key: e.key,
+            shift: e.shiftKey,
+            ctrl: true,
+            alt: e.altKey
+          }));
         } else {
-          e.preventDefault();
+          // Tecla normal o combinación
           if (ws.readyState === 1) ws.send(JSON.stringify({
             type: 'key', 
             key: e.key,
