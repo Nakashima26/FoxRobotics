@@ -625,7 +625,8 @@ def main():
 		GPIO.setmode(GPIO.BCM)
 		GPIO.setup(27, GPIO.OUT)
 		GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-		GPIO.output(27, GPIO.LOW)  # LED apagado: aun no esta listo
+		GPIO.output(27, GPIO.HIGH)  # LED encendido: la Pi ya prendio
+		print("[GPIO] LED encendido - Pi prendida.", flush=True)
 		print("[GPIO] Esperando boton en GPIO17...", flush=True)
 		while GPIO.input(17) == GPIO.LOW:
 			time.sleep(0.05)
