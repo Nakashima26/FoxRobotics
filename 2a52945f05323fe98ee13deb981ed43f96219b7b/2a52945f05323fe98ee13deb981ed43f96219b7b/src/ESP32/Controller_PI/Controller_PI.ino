@@ -1,38 +1,25 @@
 #include <Wire.h>
 #include <MPU6050_tockn.h>
 
-
-// ===== MPU6050 =====
 MPU6050 mpu(Wire);
 
-// ===== Ultrasonicos =====
 // PINES
 #define TRIG_L 27
 #define ECHO_L 32
-
 #define TRIG_R 26
 #define ECHO_R 35
 
-// ===== Motor DC =====
 #define PWMA 23
 #define A1 18
 #define A2 19
-
-// ===== SERVO (SIN LIBRERÍA) =====
 #define SERVO_PIN 13
 
-// ===== PWM CONFIG =====
 // PWM
 const int freqServo = 50;
 const int resServo = 16;
-
 const int freqMotor = 1000;
 const int resMotor = 8;
 
-// ===== PID =====
-float Kp = 1.5;
-float Ki = 0.01;
-float Kd = 0.3;
 // PID PAREDES
 float KpWall = 1.0;
 float KiWall = 0.0;
@@ -46,30 +33,40 @@ float integralWall = 0;
 float KpGyro = 2.0;
 float KiGyro = 0.0;
 float KdGyro = 0.5;
+float gyroScale = 1;
 
-float error, prevError = 0;
-float integral = 0;
-float derivada;
-float outputPID;
 float errorGyro = 0;
 float prevErrorGyro = 0;
 float integralGyro = 0;
 
-// ===== Tiempo =====
-unsigned long lastTime = 0;
 // TIEMPO
 unsigned long lastPIDTime = 0;
 unsigned long lastGyroTime = 0;
 
-// ===== Control =====
 // GIROSCOPIO
 float anguloGyro = 0;
 float anguloObjetivo = 0;
 
 // CONTROL
 int velocidadMotor = 180;
-bool girando = false;
 int centroServo = 80;
+
+// INTEGRACION PI -> ESP32
+float obsBiasNorm = 0.0;     // [-1, 1]
+int turnHint = 0;            // -1 derecha, 0 ninguno, +1 izquierda
+unsigned long lastPiMsgMs = 0;
+const unsigned long piTimeoutMs = 800;
+bool piPriority = false;
+int piMemoryFrames = 0;
+bool piReady = false;
+unsigned long bootStartMs = 0;
+
+const bool WAIT_PI_AT_BOOT = true;
+const bool ALLOW_FALLBACK_AFTER_WAIT = true;
+const unsigned long BOOT_WAIT_PI_MS = 1000;
+
+float visionSteerGain = 80.0;
+float turnHintGain = 7.0;
 
 // ESTADOS
 enum Estado {
@@ -81,35 +78,29 @@ Estado estado = SIGUIENDO;
 
 // GIROS
 bool direccionIzquierda = true;
-float anguloInicial = 0;
 bool primerGiro = false;
-
-// ===== Centro servo =====
-int centroServo = 90;
-int AngGiro = 82;
-
-// ===== FUNCIÓN SERVO =====
-void escribirServo(int angulo) {
-  if (angulo > 180) angulo = 180;
-  if (angulo < 0) angulo = 0;
+int AngGiro = 75;
 unsigned long lastTurnTime = 0;
-const int cooldownGiro = 2000;
+const int cooldownGiro = 1500;
 
-  // 500–2500 µs
-  int pulso = map(angulo, 0, 180, 500, 2500);
 // DETECCION
 int contadorEsquina = 0;
 const int umbralPared = 100;
 
-  // periodo = 20 ms → 20000 µs
-  int duty = (pulso * ((1 << resServo) - 1)) / 20000;
-// FILTRO
-float alpha = 0.75;
+// CARRERA
+int turnsCompleted = 0;
+bool raceFinished = false;
+const int TURNS_PER_RACE = 12;
 
+// FILTRO
+float alpha = 0.85;
 float distL_filtrada = 0;
 float distR_filtrada = 0;
 
-// FUNCIONES
+void printDual(String txt) {
+  Serial.print(txt);
+}
+
 void escribirServo(int angulo) {
   angulo = constrain(angulo, 0, 180);
   int pulso = map(angulo, 0, 180, 500, 2500);
@@ -117,27 +108,11 @@ void escribirServo(int angulo) {
   ledcWrite(SERVO_PIN, duty);
 }
 
-// ===== Lectura filtrada =====
-long leerDistanciaFiltrada(int trig, int echo) {
-  long suma = 0;
-  int muestras = 5;
 void setMotor(int velocidad) {
   velocidad = constrain(velocidad, 0, 255);
   ledcWrite(PWMA, velocidad);
 }
 
-  for (int i = 0; i < muestras; i++) {
-    digitalWrite(trig, LOW);
-    delayMicroseconds(2);
-    digitalWrite(trig, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(trig, LOW);
-void printDual(String txt) {
-  Serial.print(txt);
-}
-
-    long duracion = pulseIn(echo, HIGH, 30000);
-    long distancia = duracion * 0.034 / 2;
 long leerDistancia(int trig, int echo) {
   digitalWrite(trig, LOW);
   delayMicroseconds(2);
@@ -145,17 +120,13 @@ long leerDistancia(int trig, int echo) {
   delayMicroseconds(10);
   digitalWrite(trig, LOW);
 
-    if (distancia == 0 || distancia > 200) distancia = 200;
-  long duracion = pulseIn(echo, HIGH, 8000);
+  long duracion = pulseIn(echo, HIGH, 5000);
   long distancia = duracion * 0.034 / 2;
 
-    suma += distancia;
-    delay(5);
-  if (distancia == 0 || distancia > 200){
+  if (distancia == 0 || distancia > 200) {
     distancia = 200;
   }
 
-  return suma / muestras;
   return distancia;
 }
 
@@ -165,9 +136,9 @@ float filtroEMA(float nueva, float anterior) {
 
 bool detectarEsquina(long distL, long distR) {
   bool apertura = (distL > umbralPared) || (distR > umbralPared);
-  if (apertura){
+  if (apertura) {
     contadorEsquina++;
-  }else{
+  } else {
     contadorEsquina = 0;
   }
   return contadorEsquina >= 1;
@@ -177,25 +148,116 @@ void actualizarGyro() {
   unsigned long now = millis();
   float dt = (now - lastGyroTime) / 1000.0;
   lastGyroTime = now;
-  float gyroZ = mpu.getGyroZ();
 
-  // eliminar ruido
-  if (abs(gyroZ) < 1.0){
+  float gyroZ = mpu.getGyroZ()/gyroScale;
+  if (abs(gyroZ) < 1.0) {
     gyroZ = 0;
   }
+
   anguloGyro += gyroZ * dt;
 }
 
-// PID ULTRASONICOS + GYRO
+void parsePiMessage(String line) {
+  line.trim();
+
+  // Handshake de arranque: la Pi envia READY cuando termino de levantar.
+  if (line.startsWith("READY")) {
+    piReady = true;
+    lastPiMsgMs = millis();
+    Serial2.println("ACK:READY");
+    return;
+  }
+
+  // Nuevo formato recomendado:
+  // V1,obs=+0.123,turn=0,state=avoid_red
+  if (line.startsWith("V1,")) {
+    int obsIdx = line.indexOf("obs=");
+    int turnIdx = line.indexOf("turn=");
+    int prioIdx = line.indexOf("prio=");
+    int memIdx = line.indexOf("mem=");
+
+    if (obsIdx >= 0) {
+      int obsEnd = line.indexOf(',', obsIdx);
+      String obsStr = (obsEnd >= 0) ? line.substring(obsIdx + 4, obsEnd) : line.substring(obsIdx + 4);
+      obsBiasNorm = obsStr.toFloat();
+      obsBiasNorm = constrain(obsBiasNorm, -1.0, 1.0);
+    }
+
+    if (turnIdx >= 0) {
+      int turnEnd = line.indexOf(',', turnIdx);
+      String turnStr = (turnEnd >= 0) ? line.substring(turnIdx + 5, turnEnd) : line.substring(turnIdx + 5);
+      int turnVal = turnStr.toInt();
+      if (turnVal > 0) {
+        turnHint = 1;
+      } else if (turnVal < 0) {
+        turnHint = -1;
+      } else {
+        turnHint = 0;
+      }
+    }
+
+    if (prioIdx >= 0) {
+      int prioEnd = line.indexOf(',', prioIdx);
+      String prioStr = (prioEnd >= 0) ? line.substring(prioIdx + 5, prioEnd) : line.substring(prioIdx + 5);
+      piPriority = (prioStr.toInt() != 0);
+    }
+
+    if (memIdx >= 0) {
+      int memEnd = line.indexOf(',', memIdx);
+      String memStr = (memEnd >= 0) ? line.substring(memIdx + 4, memEnd) : line.substring(memIdx + 4);
+      piMemoryFrames = memStr.toInt();
+      if (piMemoryFrames < 0) {
+        piMemoryFrames = 0;
+      }
+    }
+
+    piReady = true;
+    lastPiMsgMs = millis();
+    Serial2.println("ACK:V1");
+    return;
+  }
+
+  // Modo legado: solo pixel X (como controlPI.py original)
+  bool numeric = true;
+  for (unsigned int i = 0; i < line.length(); i++) {
+    char c = line.charAt(i);
+    if (!(c >= '0' && c <= '9')) {
+      numeric = false;
+      break;
+    }
+  }
+
+  if (numeric && line.length() > 0) {
+    int x = line.toInt();
+    // Convierte 0..640 a -1..1. Si llega 700 (neutral), cae cerca de +1, asi que saturamos por rango.
+    if (x >= 0 && x <= 640) {
+      obsBiasNorm = (float(x) - 320.0) / 320.0;
+      obsBiasNorm = constrain(obsBiasNorm, -1.0, 1.0);
+      piReady = true;
+      lastPiMsgMs = millis();
+      Serial2.println("ACK:X");
+    }
+  }
+}
+
+void readPiSerial() {
+  while (Serial2.available() > 0) {
+    String line = Serial2.readStringUntil('\n');
+    if (line.length() > 0) {
+      parsePiMessage(line);
+    }
+  }
+}
+
 void controlPID(long distL, long distR) {
   unsigned long now = millis();
   float dt = (now - lastPIDTime) / 1000.0;
   lastPIDTime = now;
 
-  if (dt < 0.01){
+  if (dt < 0.01) {
     dt = 0.01;
   }
-    
+
   // PID ULTRASONICOS
   errorWall = distL - distR;
   errorWall = constrain(errorWall, -50, 50);
@@ -214,9 +276,27 @@ void controlPID(long distL, long distR) {
   float outputGyro = KpGyro * errorGyro + KiGyro * integralGyro + KdGyro * derivGyro;
   prevErrorGyro = errorGyro;
 
-  // sumar PID
   float outputFinal = outputWall + outputGyro;
+
+  bool piAlive = (millis() - lastPiMsgMs) <= piTimeoutMs;
+  float outputVision = 0;
+
+  if (piAlive) {
+    float localVisionGain = visionSteerGain;
+    if (piPriority) {
+      localVisionGain *= 1.20;
+    }
+    outputVision = (obsBiasNorm * localVisionGain) + (float(turnHint) * turnHintGain);
+  } else {
+    piPriority = false;
+    piMemoryFrames = 0;
+    turnHint = 0;
+    obsBiasNorm = 0.0;
+  }
+
+  outputFinal += outputVision;
   outputFinal = constrain(outputFinal, -25, 25);
+
   escribirServo(centroServo + outputFinal);
   setMotor(velocidadMotor);
 
@@ -224,62 +304,66 @@ void controlPID(long distL, long distR) {
   printDual(String(outputWall));
   printDual(" | Gyro:");
   printDual(String(outputGyro));
+  printDual(" | Vis:");
+  printDual(String(outputVision));
   printDual(" | Servo:");
   printDual(String(centroServo + outputFinal));
 }
 
 void setup() {
+  
   Serial.begin(115200);
+  Serial2.begin(115200, SERIAL_8N1, 17, 16);  // RX=17, TX=16
 
-  // MPU
   Wire.begin();
   mpu.begin();
+
   mpu.calcGyroOffsets(true);
 
-  // Ultrasonicos
-  // ultrasonicos
+  float oz = mpu.getGyroZoffset();
+  Serial.print("Offset Z: ");
+  Serial.println(oz);
+
+  if (abs(oz) > 7.0) {
+    Serial.println("Offset sucio - activando division /2");
+    gyroScale = 2.0;  // variable global
+  } else {
+    Serial.println("Offset limpio - escala normal");
+    gyroScale = 1.0;
+  }
+
   pinMode(TRIG_L, OUTPUT);
   pinMode(ECHO_L, INPUT);
-
   pinMode(TRIG_R, OUTPUT);
   pinMode(ECHO_R, INPUT);
 
-  // Motor
-  // motor
   pinMode(A1, OUTPUT);
   pinMode(A2, OUTPUT);
-
   digitalWrite(A1, HIGH);
   digitalWrite(A2, LOW);
 
-  // ===== PWM MOTOR =====
-  // PWM
   ledcAttach(PWMA, freqMotor, resMotor);
-
-  // ===== PWM SERVO =====
   ledcAttach(SERVO_PIN, freqServo, resServo);
-
-  // Inicializar servo
-  
   escribirServo(centroServo);
-  delay(1000);
+  delay(200);
 
-  lastTime = millis();
-
-  // inicio
   distL_filtrada = leerDistancia(TRIG_L, ECHO_L);
   distR_filtrada = leerDistancia(TRIG_R, ECHO_R);
+
   lastPIDTime = millis();
   lastGyroTime = millis();
+  lastPiMsgMs = 0;
+  bootStartMs = millis();
+
   anguloObjetivo = 0;
   // Esperar mensaje "READY" desde la Raspberry Pi por Serial antes de arrancar
   Serial.println("Esperando READY desde Pi...");
-  bool piReady = false;
+  piReady = false;
   unsigned long waitStart = millis();
-  const unsigned long waitTimeout = 30000; // timeout 30s
+  const unsigned long waitTimeout = 0; // timeout 30s
   while (!piReady && (millis() - waitStart < waitTimeout)) {
-    if (Serial.available()) {
-      String line = Serial.readStringUntil('\n');
+    if (Serial2.available()) {
+      String line = Serial2.readStringUntil('\n');
       line.trim();
       if (line.indexOf("READY") >= 0) {
         piReady = true;
@@ -292,46 +376,44 @@ void setup() {
   if (!piReady) {
     Serial.println("Timeout esperando READY; continuando sin señal Pi.");
   }
-  Serial.println("Sistema listo");
+  Serial.println("Sistema listo (Controller_PI)");
 }
 
 void loop() {
-  mpu.update();
+  readPiSerial();
 
-  long distL = leerDistanciaFiltrada(TRIG_L, ECHO_L);
-  long distR = leerDistanciaFiltrada(TRIG_R, ECHO_R);
-
-  // ===== DETECCIÓN DE GIRO =====
-  if (!girando && (distL > 80 || distR > 80)) {
-    girando = true;
-    anguloInicial = mpu.getAngleZ();
-    direccionIzquierda = (distL > distR);
-
-    Serial.println("Iniciando giro");
+  bool bootWaitActive = false;
+  if (WAIT_PI_AT_BOOT && !piReady) {
+    if (ALLOW_FALLBACK_AFTER_WAIT) {
+      bootWaitActive = (millis() - bootStartMs) < BOOT_WAIT_PI_MS;
+    } else {
+      bootWaitActive = true;
+    }
   }
 
-  // ===== MODO GIRO =====
-  if (girando) {
-    ledcWrite(PWMA, velocidadMotor);
+  if (bootWaitActive) {
+    escribirServo(centroServo);
+    setMotor(0);
+    printDual(" | Estado:WAIT_PI");
+    printDual(" | t=");
+    printDual(String((millis() - bootStartMs) / 1000.0, 1));
+    Serial.println(" ");
+    delay(20);
+    return;
+  }
 
-    if (direccionIzquierda) {
-      escribirServo(0);
-    } else {
-      escribirServo(180);
-    }
+  if (raceFinished) {
+    setMotor(0);
+    escribirServo(centroServo);
+    printDual(" | TERMINADO giros=12/12");
+    Serial.println(" ");
+    delay(20);
+    return;
+  }
 
-    float anguloActual = mpu.getAngleZ();
-    float delta = abs(anguloActual - anguloInicial);
-
-    if (delta > 180) delta = 360 - delta;
-
-    if (delta >= 90) {
-      girando = false;
-      escribirServo(centroServo);
-      Serial.println("Giro completado");
+  mpu.update();
   actualizarGyro();
 
-  // leer sensores
   long distL_raw = leerDistancia(TRIG_L, ECHO_L);
   long distR_raw = leerDistancia(TRIG_R, ECHO_R);
 
@@ -342,17 +424,15 @@ void loop() {
   long distR = distR_filtrada;
 
   switch (estado) {
-    case SIGUIENDO:
+    case SIGUIENDO: {
       velocidadMotor = 180;
       controlPID(distL, distR);
 
-      // detectar esquina
-      if ((millis() - lastTurnTime > cooldownGiro) && detectarEsquina(distL, distR) && millis() > 9000) {
-
+      bool bloqueadoPorObstaculo = piPriority || (piMemoryFrames > 0);
+      if ((millis() - lastTurnTime > cooldownGiro) && !bloqueadoPorObstaculo && detectarEsquina(distL, distR) && millis() > 9000) {
         estado = GIRANDO;
         anguloGyro = 0;
 
-        // decidir direccion
         if (!primerGiro) {
           direccionIzquierda = distL > distR;
           primerGiro = true;
@@ -361,96 +441,54 @@ void loop() {
         Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
       }
       break;
+    }
 
-    case GIRANDO:
-    {
+    case GIRANDO: {
       float delta = abs(anguloGyro);
 
-      // desacelerar para giro
-      if (delta < 45){
+      if (delta < 45) {
         velocidadMotor = 165;
-      } else if (delta < 70){
+      } else if (delta < 70) {
         velocidadMotor = 145;
-      } else{
+      } else {
         velocidadMotor = 120;
       }
-        
+
       setMotor(velocidadMotor);
 
-      // giro
-      if (direccionIzquierda){
+      if (direccionIzquierda) {
         escribirServo(150);
-      }
-      else{
+      } else {
         escribirServo(20);
       }
-        
-      // terminar giro
+
       if (delta >= AngGiro) {
         escribirServo(centroServo);
         velocidadMotor = 180;
 
-        // reset PID paredes
         integralWall = 0;
         prevErrorWall = 0;
 
-        // reset PID gyro
         integralGyro = 0;
         prevErrorGyro = 0;
 
-        // recto
         anguloObjetivo = anguloGyro;
         lastTurnTime = millis();
         estado = SIGUIENDO;
-        Serial.println("Giro completado");
+        turnsCompleted++;
+        if (turnsCompleted >= TURNS_PER_RACE) {
+          raceFinished = true;
+        }
+        Serial.print("Giro completado ");
+        Serial.print(turnsCompleted);
+        Serial.print("/");
+        Serial.println(TURNS_PER_RACE);
       }
 
       break;
     }
-
-
-    return;
   }
 
-  // ===== PID =====
-  unsigned long currentTime = millis();
-  float dt = (currentTime - lastTime) / 1000.0;
-  if (dt < 0.01) dt = 0.01;
-
-  lastTime = currentTime;
-
-  error = distL - distR;
-
-  if (error > 50) error = 50;
-  if (error < -50) error = -50;
-
-  integral += error * dt;
-
-  if (integral > 50) integral = 50;
-  if (integral < -50) integral = -50;
-
-  derivada = (error - prevError) / dt;
-
-  outputPID = Kp * error + Ki * integral + Kd * derivada;
-
-  prevError = error;
-
-  if (outputPID > 40) outputPID = 40;
-  if (outputPID < -40) outputPID = -40;
-
-  int anguloServo = centroServo + outputPID;
-
-  escribirServo(anguloServo);
-
-  // Motor
-  ledcWrite(PWMA, velocidadMotor);
-
-  // Debug
-  Serial.print("Servo: ");
-  Serial.println(anguloServo);
-
-  delay(30);
-  // prints
   printDual(" | Estado:");
   printDual(String(estado));
   printDual(" | L:");
@@ -461,5 +499,17 @@ void loop() {
   printDual(String(anguloGyro));
   printDual(" | Obj:");
   printDual(String(anguloObjetivo));
+  printDual(" | obsNorm:");
+  printDual(String(obsBiasNorm, 3));
+  printDual(" | turn:");
+  printDual(String(turnHint));
+  printDual(" | prio:");
+  printDual(String(piPriority ? 1 : 0));
+  printDual(" | mem:");
+  printDual(String(piMemoryFrames));
+  printDual(" | giros:");
+  printDual(String(turnsCompleted));
+  printDual("/");
+  printDual(String(TURNS_PER_RACE));
   Serial.println(" ");
 }
