@@ -95,6 +95,8 @@ def run_calibration(cam_index: int = C.CAM_INDEX) -> None:
     # ── Paso 1: capturar frame ─────────────────────────────────────────────────
     print("Encuadra la cámara sobre el suelo y presiona 'C' para capturar.", flush=True)
     captured_frame = None
+    cv2.namedWindow("Calibracion BEV — Captura", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("Calibracion BEV — Captura", 1280, 720)
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -123,7 +125,12 @@ def run_calibration(cam_index: int = C.CAM_INDEX) -> None:
         if event == cv2.EVENT_LBUTTONDOWN and len(clicks) < 4:
             clicks.append((x, y))
 
-    cv2.namedWindow("Calibracion BEV — Puntos")
+    cv2.namedWindow("Calibracion BEV — Puntos", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("Calibracion BEV — Puntos", 1280, 720)
+
+    cv2.namedWindow("Calibracion BEV — Preview BEV", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("Calibracion BEV — Preview BEV", 1280, 720)
+
     cv2.setMouseCallback("Calibracion BEV — Puntos", on_mouse)
 
     print("\nHaz clic en los 4 marcadores en orden: A → B → C → D", flush=True)
