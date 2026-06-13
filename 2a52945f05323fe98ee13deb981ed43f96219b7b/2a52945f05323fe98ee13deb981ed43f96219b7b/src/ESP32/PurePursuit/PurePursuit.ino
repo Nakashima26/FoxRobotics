@@ -1,0 +1,536 @@
+/*
+ * PurePursuit.ino — WRO Future Engineers
+ * Firmware ESP32 con soporte de protocolo V2 (Pure Pursuit desde Raspberry Pi).
+ *
+ * Basado en Controller_PI.ino. Diferencias respecto a la versión anterior:
+ *   1. Parseo del campo pp= en mensajes V2.
+ *   2. Cuando piPurePursuit=true:
+ *        - Se suspende el PID de paredes (ultrasonidos).
+ *        - La Pi envía obs=steer_deg/35 → ESP32 aplica ppSteerGain=35.
+ *        - Solo se mantiene una corrección liviana de gyro para estabilizar heading.
+ *   3. Cuando piPurePursuit=false (V1 o pp=0):
+ *        - Comportamiento idéntico a Controller_PI.ino.
+ *   4. Timeout de Pi (>800 ms sin mensaje):
+ *        - Fallback a wall PID + gyro (igual que antes).
+ *
+ * PINES (sin cambios):
+ *   HC-SR04 izq  : TRIG=27, ECHO=32
+ *   HC-SR04 der  : TRIG=26, ECHO=35
+ *   Motor DC     : PWMA=23, A1=18, A2=19  (TB6612FNG)
+ *   Servo SG90   : SERVO_PIN=13
+ *   MPU-6050     : I2C (SDA/SCL por defecto)
+ *   Serial Pi    : Serial2 RX=17, TX=16 @ 115200
+ */
+
+#include <Wire.h>
+#include <MPU6050_tockn.h>
+
+MPU6050 mpu(Wire);
+
+// ── Pines ─────────────────────────────────────────────────────────────────────
+#define TRIG_L      27
+#define ECHO_L      32
+#define TRIG_R      26
+#define ECHO_R      35
+
+#define PWMA        23
+#define A1          18
+#define A2          19
+#define SERVO_PIN   13
+
+// ── PWM ───────────────────────────────────────────────────────────────────────
+const int freqServo  = 50;
+const int resServo   = 16;
+const int freqMotor  = 1000;
+const int resMotor   = 8;
+
+// ── PID Paredes (ultrasónicos) ────────────────────────────────────────────────
+float KpWall = 1.0;
+float KiWall = 0.0;
+float KdWall = 1.2;
+
+float errorWall    = 0;
+float prevErrorWall = 0;
+float integralWall  = 0;
+
+// ── PID Gyro ──────────────────────────────────────────────────────────────────
+float KpGyro = 2.0;
+float KiGyro = 0.0;
+float KdGyro = 0.5;
+float gyroScale = 1;
+
+float errorGyro     = 0;
+float prevErrorGyro = 0;
+float integralGyro  = 0;
+
+// ── Tiempo ────────────────────────────────────────────────────────────────────
+unsigned long lastPIDTime  = 0;
+unsigned long lastGyroTime = 0;
+
+// ── Giroscopio ────────────────────────────────────────────────────────────────
+float anguloGyro    = 0;
+float anguloObjetivo = 0;
+
+// ── Control ───────────────────────────────────────────────────────────────────
+int velocidadMotor = 180;
+int centroServo    = 80;
+
+// ── Integración Pi → ESP32 ───────────────────────────────────────────────────
+float obsBiasNorm  = 0.0;     // obs  [-1, 1] del mensaje V2
+int   turnHint     = 0;       // turn {-1, 0, +1}
+bool  piPriority   = false;   // prio=1: obstáculo activo en Pi
+int   piMemoryFrames = 0;     // mem=N: frames de memoria restantes
+bool  piPurePursuit = false;  // pp=1: Pi en modo Pure Pursuit
+bool  piReady      = false;
+
+unsigned long lastPiMsgMs = 0;
+const unsigned long piTimeoutMs = 800;  // ms sin mensaje → fallback
+
+// Ganancia de visión V1 (modo fallback / obstáculo)
+float visionSteerGain = 80.0;
+float turnHintGain    = 7.0;
+
+// Ganancia Pure Pursuit: obs = steer_deg / 35 → outputVision = obs * 35 = steer_deg
+const float ppSteerGain = 35.0;
+
+// Reducción del gyro en modo PP (no necesita corrección tan agresiva)
+const float ppGyroFactor = 0.25;
+
+// ── Boot sincronización con Pi ────────────────────────────────────────────────
+bool piReadyReceived = false;
+unsigned long bootStartMs = 0;
+const unsigned long BOOT_WAIT_PI_MS = 1000;
+
+// ── FSM estados ───────────────────────────────────────────────────────────────
+enum Estado { SIGUIENDO, GIRANDO };
+Estado estado = SIGUIENDO;
+
+// ── Giros ─────────────────────────────────────────────────────────────────────
+bool direccionIzquierda = true;
+bool primerGiro         = false;
+int  AngGiro            = 75;
+unsigned long lastTurnTime = 0;
+const int cooldownGiro     = 1500;   // ms entre giros
+
+// ── Detección de esquinas ─────────────────────────────────────────────────────
+int contadorEsquina    = 0;
+const int umbralPared  = 100;   // cm — pared "desaparece" → esquina
+
+// ── Carrera ───────────────────────────────────────────────────────────────────
+int  turnsCompleted      = 0;
+bool raceFinished        = false;
+const int TURNS_PER_RACE = 12;
+
+// ── Filtro EMA para ultrasonidos ──────────────────────────────────────────────
+float alpha         = 0.85;
+float distL_filtrada = 0;
+float distR_filtrada = 0;
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Actuadores
+// ═══════════════════════════════════════════════════════════════════════════════
+
+void escribirServo(int angulo) {
+  angulo = constrain(angulo, 0, 180);
+  int pulso = map(angulo, 0, 180, 500, 2500);
+  int duty  = (pulso * ((1 << resServo) - 1)) / 20000;
+  ledcWrite(SERVO_PIN, duty);
+}
+
+void setMotor(int velocidad) {
+  velocidad = constrain(velocidad, 0, 255);
+  ledcWrite(PWMA, velocidad);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Sensores
+// ═══════════════════════════════════════════════════════════════════════════════
+
+long leerDistancia(int trig, int echo) {
+  digitalWrite(trig, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trig, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trig, LOW);
+
+  long dur  = pulseIn(echo, HIGH, 5000);
+  long dist = dur * 0.034 / 2;
+  if (dist == 0 || dist > 200) dist = 200;
+  return dist;
+}
+
+float filtroEMA(float nueva, float anterior) {
+  return alpha * nueva + (1.0 - alpha) * anterior;
+}
+
+void actualizarGyro() {
+  unsigned long now = millis();
+  float dt = (now - lastGyroTime) / 1000.0;
+  lastGyroTime = now;
+
+  float gz = mpu.getGyroZ() / gyroScale;
+  if (abs(gz) < 1.0) gz = 0;
+  anguloGyro += gz * dt;
+}
+
+bool detectarEsquina(long distL, long distR) {
+  bool apertura = (distL > umbralPared) || (distR > umbralPared);
+  if (apertura) contadorEsquina++;
+  else          contadorEsquina = 0;
+  return contadorEsquina >= 1;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Protocolo serial con Raspberry Pi
+// ═══════════════════════════════════════════════════════════════════════════════
+
+void parsePiMessage(String line) {
+  line.trim();
+
+  // ── Handshake ──────────────────────────────────────────────────────────────
+  if (line.startsWith("READY")) {
+    piReadyReceived = true;
+    piReady         = true;
+    lastPiMsgMs     = millis();
+    Serial2.println("ACK:READY");
+    return;
+  }
+
+  // ── Protocolo V2 (Pure Pursuit) y V1 (obstáculo) ─────────────────────────
+  // Formato: V2,obs=+0.350,turn=0,state=pp_follow,prio=0,mem=0,pp=1
+  //      o:  V1,obs=+0.123,turn=0,state=avoid_red,prio=1,mem=18,pp=0
+  //          (ambos se parsean igual — solo difiere el campo pp=)
+  if (line.startsWith("V1,") || line.startsWith("V2,")) {
+
+    // obs
+    int idx = line.indexOf("obs=");
+    if (idx >= 0) {
+      int end = line.indexOf(',', idx);
+      String s = (end >= 0) ? line.substring(idx + 4, end) : line.substring(idx + 4);
+      obsBiasNorm = constrain(s.toFloat(), -1.0, 1.0);
+    }
+
+    // turn
+    idx = line.indexOf("turn=");
+    if (idx >= 0) {
+      int end = line.indexOf(',', idx);
+      String s = (end >= 0) ? line.substring(idx + 5, end) : line.substring(idx + 5);
+      int v = s.toInt();
+      turnHint = (v > 0) ? 1 : (v < 0) ? -1 : 0;
+    }
+
+    // prio
+    idx = line.indexOf("prio=");
+    if (idx >= 0) {
+      int end = line.indexOf(',', idx);
+      String s = (end >= 0) ? line.substring(idx + 5, end) : line.substring(idx + 5);
+      piPriority = (s.toInt() != 0);
+    }
+
+    // mem
+    idx = line.indexOf("mem=");
+    if (idx >= 0) {
+      int end = line.indexOf(',', idx);
+      String s = (end >= 0) ? line.substring(idx + 4, end) : line.substring(idx + 4);
+      piMemoryFrames = max(0, s.toInt());
+    }
+
+    // pp  — campo nuevo en V2; ausente en mensajes V1 → pp=false por defecto
+    idx = line.indexOf(",pp=");
+    if (idx >= 0) {
+      String s = line.substring(idx + 4);
+      // solo toma el dígito antes de cualquier coma extra
+      int end = s.indexOf(',');
+      if (end >= 0) s = s.substring(0, end);
+      piPurePursuit = (s.toInt() != 0);
+    } else {
+      piPurePursuit = false;   // mensaje V1 sin campo pp → modo obstáculo
+    }
+
+    piReady     = true;
+    lastPiMsgMs = millis();
+    Serial2.println("ACK:V2");
+    return;
+  }
+
+  // ── Modo legado: solo píxel X (controlPI.py original) ─────────────────────
+  bool numeric = true;
+  for (unsigned int i = 0; i < line.length(); i++) {
+    char c = line.charAt(i);
+    if (!(c >= '0' && c <= '9')) { numeric = false; break; }
+  }
+  if (numeric && line.length() > 0) {
+    int x = line.toInt();
+    if (x >= 0 && x <= 640) {
+      obsBiasNorm   = constrain((float(x) - 320.0) / 320.0, -1.0, 1.0);
+      piPurePursuit = false;
+      piReady       = true;
+      lastPiMsgMs   = millis();
+      Serial2.println("ACK:X");
+    }
+  }
+}
+
+void readPiSerial() {
+  while (Serial2.available() > 0) {
+    String line = Serial2.readStringUntil('\n');
+    if (line.length() > 0) parsePiMessage(line);
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PID + control de servo
+// ═══════════════════════════════════════════════════════════════════════════════
+
+void controlPID(long distL, long distR) {
+  unsigned long now = millis();
+  float dt = (now - lastPIDTime) / 1000.0;
+  lastPIDTime = now;
+  if (dt < 0.01) dt = 0.01;
+
+  // ── Siempre calculamos wall y gyro (se usan en fallback y logs) ───────────
+  errorWall = distL - distR;
+  errorWall = constrain(errorWall, -50, 50);
+  integralWall += errorWall * dt;
+  integralWall  = constrain(integralWall, -40, 40);
+  float derivWall  = (errorWall - prevErrorWall) / dt;
+  float outputWall = KpWall * errorWall + KiWall * integralWall + KdWall * derivWall;
+  prevErrorWall = errorWall;
+
+  errorGyro = anguloObjetivo - anguloGyro;
+  errorGyro = constrain(errorGyro, -20, 20);
+  integralGyro += errorGyro * dt;
+  integralGyro  = constrain(integralGyro, -30, 30);
+  float derivGyro  = (errorGyro - prevErrorGyro) / dt;
+  float outputGyro = KpGyro * errorGyro + KiGyro * integralGyro + KdGyro * derivGyro;
+  prevErrorGyro = errorGyro;
+
+  // ── Decisión según modo ───────────────────────────────────────────────────
+  bool piAlive = (millis() - lastPiMsgMs) <= piTimeoutMs;
+  float outputVision = 0.0;
+  float outputFinal  = 0.0;
+
+  if (!piAlive) {
+    // Pi desconectada → fallback autónomo: paredes + gyro
+    piPriority    = false;
+    piMemoryFrames = 0;
+    piPurePursuit = false;
+    turnHint      = 0;
+    obsBiasNorm   = 0.0;
+    outputFinal   = outputWall + outputGyro;
+
+  } else if (piPurePursuit) {
+    // ── Modo Pure Pursuit ────────────────────────────────────────────────────
+    // Pi ya calculó el ángulo de dirección óptimo (centerline + PP).
+    // obs = steer_deg / ppSteerGain  →  outputVision = obs * ppSteerGain = steer_deg
+    // Solo añadimos una corrección liviana de gyro para estabilizar en línea recta.
+    outputVision = obsBiasNorm * ppSteerGain;
+    float lightGyro = KpGyro * errorGyro * ppGyroFactor;
+    outputFinal = outputVision + lightGyro;
+
+  } else {
+    // ── Modo V1: obstáculo / fallback PID ────────────────────────────────────
+    // Comportamiento idéntico a Controller_PI.ino
+    float localGain = visionSteerGain;
+    if (piPriority) localGain *= 1.20;
+    outputVision = (obsBiasNorm * localGain) + (float(turnHint) * turnHintGain);
+    outputFinal  = outputWall + outputGyro + outputVision;
+  }
+
+  outputFinal = constrain(outputFinal, -25, 25);
+  escribirServo(centroServo + (int)outputFinal);
+  setMotor(velocidadMotor);
+
+  // ── Debug UART ────────────────────────────────────────────────────────────
+  Serial.print(" | Mode:");
+  Serial.print(piPurePursuit ? "PP" : (piAlive ? "V1" : "FALLBACK"));
+  Serial.print(" | Wall:");   Serial.print(outputWall);
+  Serial.print(" | Gyro:");   Serial.print(outputGyro);
+  Serial.print(" | Vis:");    Serial.print(outputVision);
+  Serial.print(" | Servo:");  Serial.print(centroServo + (int)outputFinal);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Setup
+// ═══════════════════════════════════════════════════════════════════════════════
+
+void setup() {
+  Serial.begin(115200);
+  Serial2.begin(115200, SERIAL_8N1, 17, 16);   // RX=17, TX=16 → Raspberry Pi
+
+  Wire.begin();
+  mpu.begin();
+  mpu.calcGyroOffsets(true);
+
+  float oz = mpu.getGyroZoffset();
+  Serial.print("Offset Z: ");
+  Serial.println(oz);
+  gyroScale = (abs(oz) > 7.0) ? 2.0 : 1.0;
+  Serial.println(gyroScale == 2.0 ? "Offset sucio → /2" : "Offset limpio");
+
+  pinMode(TRIG_L, OUTPUT); pinMode(ECHO_L, INPUT);
+  pinMode(TRIG_R, OUTPUT); pinMode(ECHO_R, INPUT);
+
+  pinMode(A1, OUTPUT); pinMode(A2, OUTPUT);
+  digitalWrite(A1, HIGH); digitalWrite(A2, LOW);
+
+  ledcAttach(PWMA,      freqMotor, resMotor);
+  ledcAttach(SERVO_PIN, freqServo, resServo);
+  escribirServo(centroServo);
+  delay(200);
+
+  distL_filtrada = leerDistancia(TRIG_L, ECHO_L);
+  distR_filtrada = leerDistancia(TRIG_R, ECHO_R);
+
+  lastPIDTime  = millis();
+  lastGyroTime = millis();
+  lastPiMsgMs  = 0;
+  bootStartMs  = millis();
+  anguloObjetivo = 0;
+
+  // Esperar READY de la Pi (igual que Controller_PI.ino)
+  Serial.println("Esperando READY desde Pi...");
+  piReadyReceived = false;
+  unsigned long waitStart = millis();
+  while (!piReadyReceived && (millis() - waitStart < 30000)) {
+    if (Serial2.available()) {
+      String line = Serial2.readStringUntil('\n');
+      line.trim();
+      if (line.indexOf("READY") >= 0) {
+        piReadyReceived = true;
+        piReady         = true;
+        Serial.println("Recibido READY. Iniciando.");
+      }
+    }
+    delay(50);
+  }
+  if (!piReadyReceived) {
+    Serial.println("Timeout Pi — continuando sin señal Pi.");
+  }
+  Serial.println("Sistema listo (PurePursuit)");
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Loop
+// ═══════════════════════════════════════════════════════════════════════════════
+
+void loop() {
+  readPiSerial();
+
+  // Espera boot si la Pi todavía no respondió
+  if (!piReadyReceived) {
+    if ((millis() - bootStartMs) < BOOT_WAIT_PI_MS) {
+      escribirServo(centroServo);
+      setMotor(0);
+      Serial.println(" | Estado:WAIT_PI");
+      delay(20);
+      return;
+    }
+    // Pasó el timeout de arranque → continuar de todas formas
+  }
+
+  if (raceFinished) {
+    setMotor(0);
+    escribirServo(centroServo);
+    Serial.println(" | TERMINADO giros=12/12");
+    delay(20);
+    return;
+  }
+
+  mpu.update();
+  actualizarGyro();
+
+  long distL_raw = leerDistancia(TRIG_L, ECHO_L);
+  long distR_raw = leerDistancia(TRIG_R, ECHO_R);
+  distL_filtrada = filtroEMA(distL_raw, distL_filtrada);
+  distR_filtrada = filtroEMA(distR_raw, distR_filtrada);
+
+  long distL = (long)distL_filtrada;
+  long distR = (long)distR_filtrada;
+
+  switch (estado) {
+
+    case SIGUIENDO: {
+      velocidadMotor = 180;
+      controlPID(distL, distR);
+
+      // No girar si hay obstáculo activo en Pi
+      bool bloqueadoPorObstaculo = piPriority || (piMemoryFrames > 0);
+
+      if ((millis() - lastTurnTime > cooldownGiro)
+          && !bloqueadoPorObstaculo
+          && detectarEsquina(distL, distR)
+          && millis() > 9000)
+      {
+        estado     = GIRANDO;
+        anguloGyro = 0;
+
+        if (!primerGiro) {
+          direccionIzquierda = (distL > distR);
+          primerGiro         = true;
+        }
+
+        // Suspender PP durante el giro — el servo lo controla GIRANDO
+        piPurePursuit = false;
+
+        Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
+      }
+      break;
+    }
+
+    case GIRANDO: {
+      float delta = abs(anguloGyro);
+
+      if      (delta < 45) velocidadMotor = 165;
+      else if (delta < 70) velocidadMotor = 145;
+      else                 velocidadMotor = 120;
+
+      setMotor(velocidadMotor);
+      escribirServo(direccionIzquierda ? 150 : 20);
+
+      if (delta >= AngGiro) {
+        escribirServo(centroServo);
+        velocidadMotor = 180;
+
+        // Resetear integrales
+        integralWall = 0; prevErrorWall = 0;
+        integralGyro = 0; prevErrorGyro = 0;
+
+        anguloObjetivo = anguloGyro;
+        lastTurnTime   = millis();
+        estado         = SIGUIENDO;
+        turnsCompleted++;
+
+        if (turnsCompleted >= TURNS_PER_RACE) {
+          raceFinished = true;
+        }
+
+        Serial.print("Giro completado ");
+        Serial.print(turnsCompleted);
+        Serial.print("/");
+        Serial.println(TURNS_PER_RACE);
+      }
+      break;
+    }
+  }
+
+  // ── Log periódico ─────────────────────────────────────────────────────────
+  Serial.print(" | Estado:");   Serial.print(estado == GIRANDO ? "GIRANDO" : "SIGUIENDO");
+  Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
+  Serial.print(" | L:");        Serial.print(distL);
+  Serial.print(" | R:");        Serial.print(distR);
+  Serial.print(" | Ang:");      Serial.print(anguloGyro);
+  Serial.print(" | Obj:");      Serial.print(anguloObjetivo);
+  Serial.print(" | obs:");      Serial.print(obsBiasNorm, 3);
+  Serial.print(" | turn:");     Serial.print(turnHint);
+  Serial.print(" | prio:");     Serial.print(piPriority ? 1 : 0);
+  Serial.print(" | mem:");      Serial.print(piMemoryFrames);
+  Serial.print(" | giros:");    Serial.print(turnsCompleted);
+  Serial.print("/");            Serial.println(TURNS_PER_RACE);
+}

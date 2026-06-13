@@ -178,11 +178,12 @@ def color_bias(pts, obstacles):
     return clamp(score, -COLOR_BIAS_WEIGHT, COLOR_BIAS_WEIGHT)
 
 
-def score_traj(pts, grid, target_hdg, obstacles, heading_weight=1.0):
+def score_traj(pts, grid, target_hdg, obstacles, heading_bonus=0.0):
     """
     Puntua una trayectoria. Mayor = mejor. Colision -> muy negativo.
-    heading_weight > 1 cuando el heading esta bloqueado post-giro:
-      sube el peso del heading alignment y baja el color bias proporcionalmente.
+    heading_bonus: puntos extra al heading alignment post-giro (0..40).
+      Se SUMA al heading score sin tocar el color bias — el rojo/verde
+      siempre compite en igualdad de condiciones.
     """
     for i, (x, y) in enumerate(pts):
         if not cell_free(grid, x, y):
@@ -190,21 +191,21 @@ def score_traj(pts, grid, target_hdg, obstacles, heading_weight=1.0):
 
     score = 0.0
 
-    # Alineacion de heading final con target (se multiplica por heading_weight)
+    # Alineacion de heading final con target + bonus de memoria post-giro
     if len(pts) >= 2:
         dx = pts[-1][0] - pts[-2][0]
         dy = pts[-1][1] - pts[-2][1]
         final_hdg = math.degrees(math.atan2(-dy, dx))
         err = abs((final_hdg - target_hdg + 180) % 360 - 180)
-        score += max(0.0, 60.0 - err * 1.5) * heading_weight
+        score += max(0.0, 60.0 + heading_bonus - err * 1.5)
 
-    # Sesgo de color — se divide por heading_weight para que ceda ante el heading
-    score += color_bias(pts, obstacles) / max(1.0, heading_weight)
+    # Sesgo de color — independiente del heading lock, siempre activo
+    score += color_bias(pts, obstacles)
 
     return score
 
 
-def trajectory_rollout(rx, ry, hdg, grid, target_hdg, obstacles, heading_weight=1.0):
+def trajectory_rollout(rx, ry, hdg, grid, target_hdg, obstacles, heading_bonus=0.0):
     """
     Evalua N_TRAJ angulos candidatos.
     Retorna (mejor_path, lista ordenada de (score, path, steering)).
@@ -213,7 +214,7 @@ def trajectory_rollout(rx, ry, hdg, grid, target_hdg, obstacles, heading_weight=
     for i in range(N_TRAJ):
         steer = -MAX_STEERING + i * (2 * MAX_STEERING / (N_TRAJ - 1))
         pts   = rollout(rx, ry, hdg, steer)
-        sc    = score_traj(pts, grid, target_hdg, obstacles, heading_weight)
+        sc    = score_traj(pts, grid, target_hdg, obstacles, heading_bonus)
         results.append((sc, pts, steer))
     results.sort(key=lambda x: x[0], reverse=True)
     return results[0][1], results
@@ -312,7 +313,7 @@ all_trajs              = []
 lookahead_pt           = (INIT_X, INIT_Y)
 steer                  = 0.0
 heading_lock_remaining = 0
-heading_weight         = 1.0
+heading_bonus          = 0.0
 
 # ═══════════════════════════════ Main Loop ════════════════════════════════════
 running = True
@@ -373,12 +374,13 @@ while running:
         obs_clear_frames += 1
         heading_lock_remaining = max(0, heading_lock_remaining - 1)
 
-    # heading_weight: 4x cuando esta bloqueado, baja linealmente hasta 1x
-    heading_weight = 1.0 + 3.0 * (heading_lock_remaining / HEADING_LOCK_FRAMES)
+    # heading_bonus: +40 pts recien girado, baja linealmente hasta 0
+    # El color bias NO se toca — rojo/verde siempre funcionan
+    heading_bonus = 40.0 * (heading_lock_remaining / HEADING_LOCK_FRAMES)
 
     # ── 2. Trajectory Rollout ─────────────────────────────────────────────────
     best_path, all_trajs = trajectory_rollout(
-        rx, ry, heading, grid, target_heading, obstacles, heading_weight
+        rx, ry, heading, grid, target_heading, obstacles, heading_bonus
     )
 
     # ── 3. Pure Pursuit ───────────────────────────────────────────────────────
@@ -502,7 +504,7 @@ while running:
         f"steer    : {steer:7.1f} deg",
         f"best steer (rollout): {best_s:.1f}",
         f"traj score: {best_sc:.1f}",
-        f"hdg lock : {heading_lock_remaining:3d} frames  w={heading_weight:.1f}x",
+        f"hdg lock : {heading_lock_remaining:3d} frames  +{heading_bonus:.0f}pts",
         f"turns    : {turn_counter}/12   laps: {lap_str}",
         f"obstacles: {len(obstacles)}",
         f"vision r : {int(TRAJ_STEP * TRAJ_DT)}px  lookahead: {int(LOOKAHEAD)}px",
