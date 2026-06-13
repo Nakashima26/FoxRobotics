@@ -114,8 +114,7 @@ def run_calibration(cam_index: int = C.CAM_INDEX) -> None:
             cv2.destroyAllWindows()
             return
 
-    cv2.destroyWindow("Calibracion BEV — Captura")
-
+    cv2.waitKey(100)
     # ── Paso 2: clic en 4 puntos ──────────────────────────────────────────────
     clicks: list[tuple[int, int]] = []
     bev = BEVTransformer()
@@ -130,7 +129,7 @@ def run_calibration(cam_index: int = C.CAM_INDEX) -> None:
 
     cv2.namedWindow("Calibracion BEV - Preview BEV", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("Calibracion BEV - Preview BEV", 1280, 720)
-
+    cv2.waitKey(1)
     cv2.setMouseCallback("Calibracion BEV - Puntos", on_mouse)
 
     print("\nHaz clic en los 4 marcadores en orden: A → B → C → D", flush=True)
