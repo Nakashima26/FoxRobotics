@@ -95,16 +95,15 @@ def run_calibration(cam_index: int = C.CAM_INDEX) -> None:
     # ── Paso 1: capturar frame ─────────────────────────────────────────────────
     print("Encuadra la cámara sobre el suelo y presiona 'C' para capturar.", flush=True)
     captured_frame = None
-    cv2.namedWindow("Calibracion BEV — Captura", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Calibracion BEV — Captura", 1280, 720)
+    cv2.namedWindow("Calibracion BEV - Captura", cv2.WINDOW_NORMAL)
+    
     while True:
         ret, frame = cap.read()
         if not ret:
             continue
-        frame = cv2.flip(frame, 1)   # mismo flip que vision.py
         cv2.putText(frame, "Presiona C para capturar | ESC para salir",
                     (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
-        cv2.imshow("Calibracion BEV — Captura", frame)
+        cv2.imshow("Calibracion BEV - Captura", frame)
         key = cv2.waitKey(1) & 0xFF
         if key == ord('c') or key == ord('C'):
             captured_frame = frame.copy()
@@ -114,7 +113,9 @@ def run_calibration(cam_index: int = C.CAM_INDEX) -> None:
             cv2.destroyAllWindows()
             return
 
+    cv2.destroyWindow("Calibracion BEV - Captura")
     cv2.waitKey(100)
+    
     # ── Paso 2: clic en 4 puntos ──────────────────────────────────────────────
     clicks: list[tuple[int, int]] = []
     bev = BEVTransformer()
@@ -125,10 +126,7 @@ def run_calibration(cam_index: int = C.CAM_INDEX) -> None:
             clicks.append((x, y))
 
     cv2.namedWindow("Calibracion BEV - Puntos", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Calibracion BEV - Puntos", 1280, 720)
-
     cv2.namedWindow("Calibracion BEV - Preview BEV", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Calibracion BEV - Preview BEV", 1280, 720)
     cv2.waitKey(1)
     cv2.setMouseCallback("Calibracion BEV - Puntos", on_mouse)
 
@@ -156,13 +154,12 @@ def run_calibration(cam_index: int = C.CAM_INDEX) -> None:
 
             ret, live_frame = cap.read()
             if ret:
-                live_frame = cv2.flip(live_frame, 1)
                 bev_img = bev.warp(live_frame)
                 if bev_img is not None:
                     preview = _draw_bev_preview(bev_img, dst_pts)
-                    cv2.imshow("Calibracion BEV — Preview BEV", preview)
+                    cv2.imshow("Calibracion BEV - Preview BEV", preview)
 
-        cv2.imshow("Calibracion BEV — Puntos", display)
+        cv2.imshow("Calibracion BEV - Puntos", display)
         key = cv2.waitKey(1) & 0xFF
 
         if key == ord('s') or key == ord('S'):

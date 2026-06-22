@@ -1,6 +1,6 @@
 """
 Test visual de BEV + centerline + Pure Pursuit.
-No requiere ESP32 ni serial — solo cámara y bev_calib.npz.
+No requiere ESP32 ni serial solo cámara y bev_calib.npz.
 
 USO:
   python -m pure_pursuit.test_vision          # desde src/RASPI/cam/
@@ -32,27 +32,28 @@ from . import config as C
 
 
 def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
+    # ── BEV + controlador ─────────────────────────────────────────────────────
+    bev        = BEVTransformer()
+    controller = PurePursuitController()
+    vision     = Vision(cam_index)
+
     # ── Cámara o video ────────────────────────────────────────────────────────
     if video_path:
+        vision.cap.release()
         cap = cv2.VideoCapture(video_path)
         print(f"[TEST] Usando video: {video_path}", flush=True)
     else:
-        cap = cv2.VideoCapture(cam_index)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        print(f"[TEST] Usando cámara índice {cam_index}", flush=True)
+        cap = vision.cap
+        print(f"[TEST] Usando cámara índice {cam_index} con GStreamer", flush=True)
+
+    vision.cap = cap
 
     if not cap.isOpened():
         print("[TEST] ERROR: No se pudo abrir la fuente de video.", flush=True)
         return
 
-    # ── BEV + controlador ─────────────────────────────────────────────────────
-    bev        = BEVTransformer()
-    controller = PurePursuitController()
-    vision     = Vision(cam_index)
-    vision.cap = cap   # reusar la misma cap
-
     if not bev.is_calibrated:
-        print("[TEST] ADVERTENCIA: sin bev_calib.npz — solo se muestra la cámara cruda.", flush=True)
+        print("[TEST] ADVERTENCIA: sin bev_calib.npz  solo se muestra la cámara cruda.", flush=True)
         print("[TEST] Corre primero: python -m pure_pursuit.calibrate", flush=True)
     else:
         print("[TEST] BEV calibrado OK. Mostrando pipeline completo.", flush=True)
@@ -85,7 +86,7 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
         processed, positions = vision.process_frame(frame)
 
         if not bev.is_calibrated:
-            cv2.putText(processed, "Sin calibracion BEV — corre calibrate.py",
+            cv2.putText(processed, "Sin calibracion BEV corre calibrate.py",
                         (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             cv2.imshow("TEST Vision", processed)
             if cv2.waitKey(1) & 0xFF == 27:
@@ -137,7 +138,7 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
         cam_h = processed.shape[0]
         bev_small = cv2.resize(bev_debug, (cam_h, cam_h))
         combined  = np.hstack([processed, bev_small])
-        cv2.imshow("TEST Vision — camara | BEV", combined)
+        cv2.imshow("TEST Vision - camara | BEV", combined)
 
         key = cv2.waitKey(1) & 0xFF
         if key == 27:

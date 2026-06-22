@@ -43,8 +43,8 @@ CALIB_REAL_MM = np.float32([
 ])
 
 # ─── Color del piso (HSV) — tapete WRO: beige / madera cálida ────────────────
-FLOOR_LOWER = np.array([5,  20,  40])
-FLOOR_UPPER = np.array([35, 200, 255])
+FLOOR_LOWER = np.array([0,   0,  40])
+FLOOR_UPPER = np.array([180, 60, 240])
 
 # ─── Detección de centerline ──────────────────────────────────────────────────
 CENTERLINE_ROW_STEP  = 15    # muestrear cada N filas
