@@ -73,7 +73,6 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
                 continue
             time.sleep(0.01)
             continue
-        frame = cv2.flip(frame, 1)
         loop += 1
         fps_count += 1
         now = time.perf_counter()
