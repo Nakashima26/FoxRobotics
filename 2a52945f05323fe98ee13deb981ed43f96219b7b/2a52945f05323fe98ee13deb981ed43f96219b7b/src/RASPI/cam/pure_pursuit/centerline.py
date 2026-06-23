@@ -130,10 +130,16 @@ def detect_centerline(
         forced_cx: int | None = None
         for ox, oy, color in bev_obstacles:
             if abs(oy - y) <= C.OBS_INFLATE_R + C.OBS_BIAS_SHIFT:
+                iox = int(ox)
+                pref_min = max(1, C.CENTERLINE_MIN_WIDTH // 2)
                 if color == "Red":
-                    forced_cx = int(ox) + C.OBS_PHYSICAL_R_PX   # derecha del obstáculo
+                    # Buscar centro del espacio libre a la derecha del obstáculo
+                    cx_rel = _widest_free_segment(free_mask[y, iox:], pref_min)
+                    forced_cx = (iox + cx_rel) if cx_rel is not None else iox + C.OBS_PHYSICAL_R_PX
                 elif color == "Green":
-                    forced_cx = int(ox) - C.OBS_PHYSICAL_R_PX   # izquierda del obstáculo
+                    # Buscar centro del espacio libre a la izquierda del obstáculo
+                    cx_abs = _widest_free_segment(free_mask[y, :iox], pref_min)
+                    forced_cx = cx_abs if cx_abs is not None else iox - C.OBS_PHYSICAL_R_PX
                 break
 
         if forced_cx is not None:
