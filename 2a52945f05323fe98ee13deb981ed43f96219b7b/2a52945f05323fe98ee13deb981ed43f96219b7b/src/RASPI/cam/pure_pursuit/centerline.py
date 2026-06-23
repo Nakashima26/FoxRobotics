@@ -50,11 +50,6 @@ def map_obstacle_to_bev(
 def _widest_free_segment(row_mask: np.ndarray, min_width: int) -> int | None:
     """
     Retorna el centro-x del segmento libre más ancho en una fila de máscara.
-
-    Usar el rango total (free_cols[0]..free_cols[-1]) falla cuando un obstáculo
-    parte la fila en dos segmentos: el "punto medio" cae sobre el obstáculo.
-    Al elegir el segmento más ancho, el OBS_BIAS_SHIFT ya garantiza que el lado
-    correcto (por el que debe pasar el robot) sea el más ancho.
     """
     free_cols = np.where(row_mask > 0)[0]
     if len(free_cols) < min_width:
@@ -66,14 +61,14 @@ def _widest_free_segment(row_mask: np.ndarray, min_width: int) -> int | None:
 
     for c in free_cols[1:]:
         ci = int(c)
-        if ci > seg_prev + 1:           # hueco → fin de segmento
+        if ci > seg_prev + 1:
             w = seg_prev - seg_l + 1
             if w > best_w:
                 best_w, best_l, best_r = w, seg_l, seg_prev
             seg_l = ci
         seg_prev = ci
 
-    w = seg_prev - seg_l + 1           # último segmento
+    w = seg_prev - seg_l + 1
     if w > best_w:
         best_w, best_l, best_r = w, seg_l, seg_prev
 
@@ -130,9 +125,23 @@ def detect_centerline(
     # ── 3. Muestreo fila a fila ───────────────────────────────────────────────
     points: list[tuple[int, int]] = []
     for y in range(h - 10, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
-        cx = _widest_free_segment(free_mask[y, :], C.CENTERLINE_MIN_WIDTH)
-        if cx is not None:
-            points.append((cx, y))
+        # Si hay obstáculo activo en esta fila, forzar punto en el lado correcto
+        # sin consultar la máscara de piso.
+        forced_cx: int | None = None
+        for ox, oy, color in bev_obstacles:
+            if abs(oy - y) <= C.OBS_INFLATE_R + C.OBS_BIAS_SHIFT:
+                if color == "Red":
+                    forced_cx = int(ox) + C.OBS_PHYSICAL_R_PX   # derecha del obstáculo
+                elif color == "Green":
+                    forced_cx = int(ox) - C.OBS_PHYSICAL_R_PX   # izquierda del obstáculo
+                break
+
+        if forced_cx is not None:
+            points.append((np.clip(forced_cx, 0, w - 1), y))
+        else:
+            cx = _widest_free_segment(free_mask[y, :], C.CENTERLINE_MIN_WIDTH)
+            if cx is not None:
+                points.append((cx, y))
 
     return points
 
