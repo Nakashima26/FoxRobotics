@@ -101,7 +101,6 @@ def run_calibration(cam_index: int = C.CAM_INDEX) -> None:
         ret, frame = cap.read()
         if not ret:
             continue
-        frame = cv2.flip(frame, 1)
         cv2.putText(frame, "Presiona C para capturar | ESC para salir",
                     (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
         cv2.imshow("Calibracion BEV - Captura", frame)
@@ -155,7 +154,6 @@ def run_calibration(cam_index: int = C.CAM_INDEX) -> None:
 
             ret, live_frame = cap.read()
             if ret:
-                live_frame = cv2.flip(live_frame, 1)
                 bev_img = bev.warp(live_frame)
                 if bev_img is not None:
                     preview = _draw_bev_preview(bev_img, dst_pts)
