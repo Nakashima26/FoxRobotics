@@ -74,7 +74,7 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
             time.sleep(0.01)
             continue
         loop += 1
-        frame=cv2.flip(frame,1)
+        frame = cv2.flip(frame, 1)
         fps_count += 1
         now = time.perf_counter()
         if now - t_last >= 1.0:
@@ -94,17 +94,23 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
             continue
 
         # ── Pipeline BEV ─────────────────────────────────────────────────────
-        bev_frame = bev.warp(processed)
+        try:
+            bev_frame = bev.warp(processed)
 
-        bev_obstacles: list[tuple[float, float, str]] = []
-        for color_name in ("Red", "Green"):
-            for obj in positions.get(color_name, []):
-                x, y, w, h = obj
-                result = map_obstacle_to_bev(bev, x, y, w, h)
-                if result is not None:
-                    bev_obstacles.append((result[0], result[1], color_name))
+            bev_obstacles: list[tuple[float, float, str]] = []
+            for color_name in ("Red", "Green"):
+                for obj in positions.get(color_name, []):
+                    x, y, w, h = obj
+                    result = map_obstacle_to_bev(bev, x, y, w, h)
+                    if result is not None:
+                        bev_obstacles.append((result[0], result[1], color_name))
 
-        path_points = detect_centerline(bev_frame, bev_obstacles)
+            path_points = detect_centerline(bev_frame, bev_obstacles)
+        except Exception as e:
+            import traceback
+            print(f"[ERROR] {e}", flush=True)
+            traceback.print_exc()
+            continue
 
         steer_deg   = 0.0
         lookahead_pt = (float(C.ROBOT_BEV_X), float(C.ROBOT_BEV_Y))

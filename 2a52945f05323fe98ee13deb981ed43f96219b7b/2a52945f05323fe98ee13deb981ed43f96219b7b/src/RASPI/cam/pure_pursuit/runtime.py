@@ -357,6 +357,7 @@ class PPRuntime:
                     last_fps_time = now
 
                 # ── Visión ──────────────────────────────────────────────────
+                frame = cv2.flip(frame, 1)
                 processed_frame, positions = self.vision.process_frame(frame)
 
                 # ── Decisión de obstáculo (siempre se calcula) ───────────────
