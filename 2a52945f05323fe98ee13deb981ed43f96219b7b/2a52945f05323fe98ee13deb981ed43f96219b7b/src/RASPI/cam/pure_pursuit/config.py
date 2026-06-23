@@ -36,8 +36,8 @@ ROBOT_BEV_Y = BEV_H - 20   # 380
 # haz clic en ellos en el mismo orden dentro de calibrate.py:
 #   A → izq-cerca    B → der-cerca    C → izq-lejos    D → der-lejos
 CALIB_REAL_MM = np.float32([
-    [-100.0, 200.0],   # A: 20 cm adelante, 10 cm izquierda
-    [ 100.0, 200.0],   # B: 20 cm adelante, 10 cm derecha
+    [ -60.0, 200.0],   # A: 20 cm adelante,  6 cm izquierda
+    [  60.0, 200.0],   # B: 20 cm adelante,  6 cm derecha
     [-150.0, 380.0],   # C: 38 cm adelante, 15 cm izquierda
     [ 150.0, 380.0],   # D: 38 cm adelante, 15 cm derecha
 ])
