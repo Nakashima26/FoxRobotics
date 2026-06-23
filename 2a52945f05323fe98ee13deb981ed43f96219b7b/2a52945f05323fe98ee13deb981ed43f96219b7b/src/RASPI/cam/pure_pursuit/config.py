@@ -52,7 +52,12 @@ CENTERLINE_MIN_WIDTH = 20    # píxeles mínimos de espacio libre para aceptar f
 CENTERLINE_TOP_Y     = BEV_H // 3   # no subir más allá de 1/3 de la imagen
 
 # ─── Manejo de obstáculos en BEV ─────────────────────────────────────────────
-OBS_INFLATE_R  = 35    # radio de inflado simétrico de seguridad (px)
+# Tamaño físico real de los obstáculos (latas de refresco WRO ≈ 65 mm diámetro)
+OBS_REAL_DIAMETER_MM = 65.0
+OBS_PHYSICAL_R_PX    = round(OBS_REAL_DIAMETER_MM / 2.0 / MM_PER_PX)  # ≈ 16 px
+OBS_SAFETY_R_PX      = 19    # margen de seguridad adicional (px)
+OBS_INFLATE_R        = OBS_PHYSICAL_R_PX + OBS_SAFETY_R_PX             # ≈ 35 px
+
 OBS_BIAS_SHIFT = 28    # desplazamiento lateral para sesgo de color WRO (px)
 #  Rojo  → el robot debe pasar por la DERECHA → se infla más a la izquierda
 #  Verde → el robot debe pasar por la IZQUIERDA → se infla más a la derecha
@@ -76,7 +81,7 @@ PID_KD           = 0.004
 CORR_LIMIT_PX    = 160.0
 
 # ─── Cámara / captura ─────────────────────────────────────────────────────────
-CAM_INDEX      = 0
+CAM_INDEX      = 1
 SERIAL_PORT    = "/dev/ttyS0"
 BAUDRATE       = 115200
 PROCESS_EVERY  = 3       # procesar 1 de cada N frames capturados

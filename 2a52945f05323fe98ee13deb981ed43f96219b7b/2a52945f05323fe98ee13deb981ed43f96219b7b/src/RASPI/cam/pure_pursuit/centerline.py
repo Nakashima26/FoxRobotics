@@ -45,6 +45,43 @@ def map_obstacle_to_bev(
     return None
 
 
+# ── Helpers internos ──────────────────────────────────────────────────────────
+
+def _widest_free_segment(row_mask: np.ndarray, min_width: int) -> int | None:
+    """
+    Retorna el centro-x del segmento libre más ancho en una fila de máscara.
+
+    Usar el rango total (free_cols[0]..free_cols[-1]) falla cuando un obstáculo
+    parte la fila en dos segmentos: el "punto medio" cae sobre el obstáculo.
+    Al elegir el segmento más ancho, el OBS_BIAS_SHIFT ya garantiza que el lado
+    correcto (por el que debe pasar el robot) sea el más ancho.
+    """
+    free_cols = np.where(row_mask > 0)[0]
+    if len(free_cols) < min_width:
+        return None
+
+    best_l = best_r = -1
+    best_w = 0
+    seg_l = seg_prev = int(free_cols[0])
+
+    for c in free_cols[1:]:
+        ci = int(c)
+        if ci > seg_prev + 1:           # hueco → fin de segmento
+            w = seg_prev - seg_l + 1
+            if w > best_w:
+                best_w, best_l, best_r = w, seg_l, seg_prev
+            seg_l = ci
+        seg_prev = ci
+
+    w = seg_prev - seg_l + 1           # último segmento
+    if w > best_w:
+        best_w, best_l, best_r = w, seg_l, seg_prev
+
+    if best_w < min_width:
+        return None
+    return (best_l + best_r) // 2
+
+
 # ── Detección de centerline ───────────────────────────────────────────────────
 
 def detect_centerline(
@@ -93,11 +130,9 @@ def detect_centerline(
     # ── 3. Muestreo fila a fila ───────────────────────────────────────────────
     points: list[tuple[int, int]] = []
     for y in range(h - 10, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
-        free_cols = np.where(free_mask[y, :] > 0)[0]
-        if len(free_cols) < C.CENTERLINE_MIN_WIDTH:
-            continue
-        cx = int((int(free_cols[0]) + int(free_cols[-1])) // 2)
-        points.append((cx, y))
+        cx = _widest_free_segment(free_mask[y, :], C.CENTERLINE_MIN_WIDTH)
+        if cx is not None:
+            points.append((cx, y))
 
     return points
 
@@ -126,8 +161,9 @@ def draw_bev_debug(
     # Obstáculos
     for ox, oy, color in bev_obstacles:
         col_bgr = (0, 0, 200) if color == "Red" else (0, 200, 0)
-        cv2.circle(out, (int(ox), int(oy)), C.OBS_INFLATE_R, col_bgr, 1)
-        cv2.circle(out, (int(ox), int(oy)), 5, col_bgr, -1)
+        cv2.circle(out, (int(ox), int(oy)), C.OBS_INFLATE_R,   col_bgr, 1)   # zona bloqueada
+        cv2.circle(out, (int(ox), int(oy)), C.OBS_PHYSICAL_R_PX, col_bgr, 2)  # tamaño real de lata
+        cv2.circle(out, (int(ox), int(oy)), 4, col_bgr, -1)
 
     # Centerline
     if len(path_points) > 1:
