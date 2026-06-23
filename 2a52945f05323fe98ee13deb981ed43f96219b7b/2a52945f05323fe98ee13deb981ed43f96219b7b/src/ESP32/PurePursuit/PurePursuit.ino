@@ -237,7 +237,7 @@ void parsePiMessage(String line) {
     if (idx >= 0) {
       int end = line.indexOf(',', idx);
       String s = (end >= 0) ? line.substring(idx + 4, end) : line.substring(idx + 4);
-      piMemoryFrames = max(0, s.toInt());
+      piMemoryFrames = max(0L, s.toInt());
     }
 
     // pp  — campo nuevo en V2; ausente en mensajes V1 → pp=false por defecto
