@@ -41,7 +41,7 @@ class PurePursuitController:
             return 0.0, (float(robot_x), float(robot_y))
 
         # Busca el primer punto a distancia >= LOOKAHEAD_PX
-        target = path_points[0]   # fallback: el más cercano disponible
+        target = path_points[-1]   # fallback: el más lejano disponible (path_points[0] está detrás del robot)
         for pt in path_points:
             dist = math.hypot(pt[0] - robot_x, pt[1] - robot_y)
             if dist >= C.LOOKAHEAD_PX:

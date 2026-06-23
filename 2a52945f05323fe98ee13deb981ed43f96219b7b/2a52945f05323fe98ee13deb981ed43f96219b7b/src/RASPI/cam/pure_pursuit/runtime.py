@@ -1,26 +1,26 @@
 """
 Runtime Pure Pursuit — WRO Future Engineers.
 
-Punto de entrada principal del módulo.  Reemplaza wro_runtime.py cuando
-la calibración BEV está disponible.
+Punto de entrada principal del módulo.  Es el pipeline de test_vision.py
+(cámara → BEV → centerline → Pure Pursuit) más el envío serial al ESP32.
+
+El carrito SIEMPRE intenta seguir la línea central.  Los obstáculos rojo/verde
+ya están metidos dentro de la línea: detect_centerline los infla con el sesgo de
+color WRO, así que la centerline pasa por el lado correcto y el robot simplemente
+la sigue.  No hay un sistema de esquive separado.
 
 Pipeline por frame:
   1. Captura (ThreadedFrameGrabber, mismo que wro_runtime.py)
   2. vision.process_frame() → detección HSV de obstáculos rojo/verde
-  3. Si BEV calibrado y sin prioridad de obstáculo:
-       bev.warp() → detect_centerline() → PurePursuitController.compute()
-       → mensaje V2 con pp=1
-  4. Si obstáculo con prioridad O sin calibración BEV:
-       PID de pixel (idéntico a wro_runtime.py) → mensaje V2 con pp=0
-  5. TurnDetector (análisis de madera en ROI superior) → turn_hint
-  6. SerialLink.send_line() → ESP32
+  3. bev.warp() → map_obstacle_to_bev() → detect_centerline()
+  4. PurePursuitController.compute() → steer_deg → obs = steer_deg/35
+  5. SerialLink.send_line() → ESP32  (mensaje V2 con pp=1)
 
 Protocolo serial V2:
-  V2,obs=+0.350,turn=0,state=pp_follow,prio=0,mem=0,pp=1
-  V2,obs=-0.125,turn=0,state=avoid_red,prio=1,mem=18,pp=0
+  V2,obs=+0.350,turn=0,state=pp_follow,prio=0,mem=0,pp=1   (siguiendo línea)
+  V2,obs=+0.000,turn=0,state=no_path,prio=0,mem=0,pp=1     (sin línea → recto)
 
-  • pp=1 → ESP32 usa ppSteerGain (35°) y suspende PID de paredes
-  • pp=0 → ESP32 usa visionSteerGain (80) con PID de paredes activo (V1)
+  • pp=1 → ESP32 usa ppSteerGain (35°) para recuperar steer_deg.
 
 Secuencia de arranque (idéntica a wro_runtime.py):
   GPIO17 (botón) → LED GPIO27 → warmup cámara → UART READY → loop
@@ -46,9 +46,6 @@ from wro_runtime import (
     ThreadedFrameGrabber,
     AsyncVideoWriter,
     SerialLink,
-    TurnDetector,
-    PID,
-    next_output_path,
     resolve_output_path,
     CAM_FRAME_PATH,
 )
@@ -81,30 +78,12 @@ class PPConfig:
     # BEV
     calib_path: Path | None = None
 
-    # Fallback PID de pixel (mismo que wro_runtime.py)
-    red_target_px:           int   = C.RED_TARGET_PX
-    green_target_px:         int   = C.GREEN_TARGET_PX
-    pid_kp:                  float = C.PID_KP
-    pid_kd:                  float = C.PID_KD
-    correction_limit_px:     float = C.CORR_LIMIT_PX
-    obstacle_hold_band:      float = 24.0
-    obstacle_memory_frames:  int   = 18
-    obstacle_clear_frames:   int   = 10
-    obstacle_fade_factor:    float = 0.85
-    obstacle_max_corr_px:    float = 35.0
-
-    # TurnDetector
-    turn_top_ratio:  float = 0.30
-    turn_drop_ratio: float = 0.85
-
-    neutral_x: int = 700
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 
 class PPRuntime:
     """
-    Runtime integrado con pipeline Pure Pursuit + fallback pixel PID.
+    Runtime Pure Pursuit puro: sigue la centerline y manda steer_deg al ESP32.
     La infraestructura de captura, serial y GPIO es idéntica a wro_runtime.py.
     """
 
@@ -112,25 +91,15 @@ class PPRuntime:
         self.cfg = cfg
 
         # Visión
-        self.vision    = Vision(cfg.cam_index)
-        self.bev       = BEVTransformer(cfg.calib_path)
+        self.vision     = Vision(cfg.cam_index)
+        self.bev        = BEVTransformer(cfg.calib_path)
         self.controller = PurePursuitController()
-        self.turn_detector = TurnDetector(cfg.turn_top_ratio, cfg.turn_drop_ratio)
-
-        # PID de fallback (pixel-based)
-        self.pid_obs = PID(cfg.pid_kp, cfg.pid_kd)
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
 
-        # Estado de obstáculo (espejo exacto de wro_runtime.py)
-        self.persistencia_obstaculo  = 0
-        self.obstaculo_clear_frames  = 0
-        self.ultimo_color_obstaculo  = None
-        self.ultima_correccion_px    = 0.0
-
         # Captura / grabación
-        self.loop_count   = 0
+        self.loop_count    = 0
         self.frame_grabber = None
         self.video_writer  = None
         self.record_count  = 0
@@ -145,99 +114,16 @@ class PPRuntime:
         if self.bev.is_calibrated:
             print("[PP] BEV calibrado — Pure Pursuit activo.", flush=True)
         else:
-            print("[PP] Sin calibración BEV — usando fallback pixel PID.", flush=True)
+            print("[PP] Sin calibración BEV — el robot irá recto.", flush=True)
             print(f"[PP] Corre: python -m pure_pursuit.calibrate", flush=True)
-
-    # ── Detección de obstáculos (idéntico a wro_runtime.py) ──────────────────
-
-    @staticmethod
-    def _largest_object(objects):
-        if not objects:
-            return None, None
-        obj = max(objects, key=lambda o: o[2] * o[3])
-        x, y, w, h = obj
-        return obj, x + w // 2
-
-    def _obstacle_decision(self, positions: dict, frame_width: int) -> dict:
-        red_obj,   red_x   = self._largest_object(positions.get("Red",   []))
-        green_obj, green_x = self._largest_object(positions.get("Green", []))
-
-        if red_obj and green_obj:
-            use_red = red_obj[2] * red_obj[3] >= green_obj[2] * green_obj[3]
-        else:
-            use_red = bool(red_obj)
-
-        if use_red and red_obj:
-            x        = red_x
-            error_px = float(self.cfg.red_target_px - x)
-            color, mode = "Red", "avoid_red"
-        elif green_obj:
-            x        = green_x
-            error_px = float(self.cfg.green_target_px - x)
-            color, mode = "Green", "avoid_green"
-        else:
-            return {"detected": False, "color": "None", "x": None,
-                    "error_px": 0.0, "vision_error_norm": 0.0,
-                    "mode": "no_obstacle", "priority": False, "memory_frames": 0}
-
-        if abs(error_px) > self.cfg.obstacle_hold_band:
-            corr = self.pid_obs.compute(error_px)
-            corr = max(-self.cfg.correction_limit_px,
-                       min(self.cfg.correction_limit_px, corr))
-            self.ultima_correccion_px = corr
-        else:
-            corr = 0.0
-            self.pid_obs.prev_error = 0.0
-            self.ultima_correccion_px = 0.0
-
-        self.persistencia_obstaculo = self.cfg.obstacle_memory_frames
-        self.obstaculo_clear_frames = 0
-        self.ultimo_color_obstaculo = color
-
-        norm = -(corr / max(1.0, self.cfg.correction_limit_px))
-        return {"detected": True, "color": color, "x": x,
-                "error_px": error_px, "vision_error_norm": float(norm),
-                "mode": mode, "priority": True,
-                "memory_frames": self.persistencia_obstaculo}
-
-    def _obstacle_memory_decision(self) -> dict:
-        if self.persistencia_obstaculo <= 0:
-            self.obstaculo_clear_frames += 1
-            return {"detected": False, "color": "None", "x": None,
-                    "error_px": 0.0, "vision_error_norm": 0.0,
-                    "mode": "no_obstacle", "priority": False, "memory_frames": 0}
-
-        self.persistencia_obstaculo -= 1
-        self.obstaculo_clear_frames  = 0
-
-        corr = self.ultima_correccion_px * self.cfg.obstacle_fade_factor
-        corr = max(-self.cfg.obstacle_max_corr_px,
-                   min(self.cfg.obstacle_max_corr_px, corr))
-        self.ultima_correccion_px = corr
-
-        color = self.ultimo_color_obstaculo or "None"
-        mode  = f"memory_{color.lower()}" if color != "None" else "memory_unknown"
-        norm  = -(corr / max(1.0, self.cfg.correction_limit_px)) if color != "None" else 0.0
-
-        return {"detected": False, "color": color, "x": None,
-                "error_px": 0.0, "vision_error_norm": norm,
-                "mode": mode, "priority": True,
-                "memory_frames": self.persistencia_obstaculo}
 
     # ── Serial ────────────────────────────────────────────────────────────────
 
-    def _build_serial_message(
-        self,
-        obs_norm:   float,
-        turn_hint:  int,
-        state:      str,
-        prio:       int,
-        mem:        int,
-        pp_active:  bool,
-    ) -> str:
-        pp_flag = ",pp=1" if pp_active else ",pp=0"
-        return (f"V2,obs={obs_norm:+.3f},turn={int(turn_hint)},"
-                f"state={state},prio={prio},mem={mem}{pp_flag}")
+    def _build_serial_message(self, obs_norm: float, state: str) -> str:
+        # En modo Pure Pursuit puro: turn/prio/mem no aplican (el ESP gira por
+        # ultrasónicos).  pp=1 siempre para que el ESP use ppSteerGain.
+        return (f"V2,obs={obs_norm:+.3f},turn=0,"
+                f"state={state},prio=0,mem=0,pp=1")
 
     # ── Captura ───────────────────────────────────────────────────────────────
 
@@ -282,21 +168,18 @@ class PPRuntime:
     def _annotate(
         self,
         frame:        np.ndarray,
-        obs_info:     dict,
-        turn_hint:    int,
-        left_ratio:   float,
-        right_ratio:  float,
-        serial_msg:   str,
-        fps:          float,
+        steer_deg:    float,
+        obs_norm:     float,
         pp_active:    bool,
         n_path_pts:   int,
+        positions:    dict,
+        serial_msg:   str,
+        fps:          float,
     ):
-        mode_str = f"PP({n_path_pts}pts)" if pp_active else "FALLBACK_PID"
         lines = [
-            f"mode={mode_str}  fps={fps:.1f}",
-            f"obs={obs_info['color']}  x={obs_info['x']}  prio={int(obs_info.get('priority',False))}",
-            f"state={obs_info['mode']}  mem={obs_info.get('memory_frames',0)}",
-            f"turn={turn_hint}  wL={left_ratio:.3f}  wR={right_ratio:.3f}",
+            f"fps={fps:.1f}  pp={'ON' if pp_active else 'OFF'}  pts={n_path_pts}",
+            f"steer={steer_deg:+.1f} deg  obs={obs_norm:+.3f}",
+            f"obs_R={len(positions.get('Red', []))}  obs_G={len(positions.get('Green', []))}",
             f"tx: {serial_msg[:55]}",
         ]
         y = 22
@@ -333,8 +216,6 @@ class PPRuntime:
         last_fps_time = time.perf_counter()
         fps_count     = 0
         fps           = 0.0
-        lookahead_pt  = (float(C.ROBOT_BEV_X), float(C.ROBOT_BEV_Y))
-        steer_deg     = 0.0
 
         try:
             while True:
@@ -360,60 +241,46 @@ class PPRuntime:
                 frame = cv2.flip(frame, 1)
                 processed_frame, positions = self.vision.process_frame(frame)
 
-                # ── Decisión de obstáculo (siempre se calcula) ───────────────
-                obs_now = self._obstacle_decision(positions, processed_frame.shape[1])
-                if obs_now["detected"]:
-                    obs_info = obs_now
-                else:
-                    self.pid_obs.prev_error = 0.0
-                    obs_info = self._obstacle_memory_decision()
+                # ── Pipeline Pure Pursuit (idéntico a test_vision.py) ────────
+                steer_deg     = 0.0
+                obs_norm      = 0.0
+                lookahead_pt  = (float(C.ROBOT_BEV_X), float(C.ROBOT_BEV_Y))
+                path_points   = []
+                bev_frame     = None
+                bev_obstacles = []
+                pp_active     = False
 
-                # ── Detección de giro (madera en ROI superior) ───────────────
-                turn_raw, left_ratio, right_ratio = self.turn_detector.detect(processed_frame)
-                can_turn = (not obs_info.get("priority", False) and
-                            self.obstaculo_clear_frames >= self.cfg.obstacle_clear_frames)
-                turn_hint = turn_raw if can_turn else 0
-
-                # ── Pipeline Pure Pursuit ────────────────────────────────────
-                pp_active      = False
-                bev_frame      = None
-                path_points    = []
-                bev_obstacles  = []
-                obs_norm       = obs_info["vision_error_norm"]
-                state          = obs_info["mode"]
-                prio           = 1 if obs_info.get("priority", False) else 0
-                mem            = int(obs_info.get("memory_frames", 0))
-
-                # BEV siempre se computa si está calibrado (para visualización y centerline)
                 if self.bev.is_calibrated:
-                    bev_frame = self.bev.warp(processed_frame)
+                    try:
+                        bev_frame = self.bev.warp(processed_frame)
 
-                    # Proyectar obstáculos detectados al plano BEV
-                    for color_name in ("Red", "Green"):
-                        for obj in positions.get(color_name, []):
-                            x, y, w, h = obj
-                            result = map_obstacle_to_bev(self.bev, x, y, w, h)
-                            if result is not None:
-                                bev_obstacles.append((result[0], result[1], color_name))
+                        # Proyectar obstáculos detectados al plano BEV
+                        for color_name in ("Red", "Green"):
+                            for obj in positions.get(color_name, []):
+                                x, y, w, h = obj
+                                result = map_obstacle_to_bev(self.bev, x, y, w, h)
+                                if result is not None:
+                                    bev_obstacles.append((result[0], result[1], color_name))
 
-                    # Detectar centerline en BEV
-                    path_points = detect_centerline(bev_frame, bev_obstacles)
+                        # Detectar centerline (con obstáculos ya inflados)
+                        path_points = detect_centerline(bev_frame, bev_obstacles)
 
-                    # PP activo solo cuando no hay prioridad de obstáculo
-                    if not obs_info.get("priority", False) and len(path_points) >= C.MIN_PATH_PTS:
-                        steer_deg, lookahead_pt = self.controller.compute(
-                            path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
-                        )
-                        obs_norm  = self.controller.normalize(steer_deg)
-                        state     = "pp_follow"
-                        prio      = 0
-                        mem       = 0
-                        pp_active = True
+                        if len(path_points) >= C.MIN_PATH_PTS:
+                            steer_deg, lookahead_pt = self.controller.compute(
+                                path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
+                            )
+                            obs_norm  = self.controller.normalize(steer_deg)
+                            pp_active = True
+                    except Exception as e:
+                        import traceback
+                        print(f"[ERROR] {e}", flush=True)
+                        traceback.print_exc()
+
+                # Sin línea válida → recto (obs=0).  En teoría siempre hay línea.
+                state = "pp_follow" if pp_active else "no_path"
 
                 # ── Construir y enviar mensaje serial ────────────────────────
-                serial_msg = self._build_serial_message(
-                    obs_norm, turn_hint, state, prio, mem, pp_active
-                )
+                serial_msg = self._build_serial_message(obs_norm, state)
                 self.serial_link.send_line(serial_msg)
                 serial_ack = self.serial_link.try_readline()
 
@@ -424,9 +291,9 @@ class PPRuntime:
 
                 # ── Display ──────────────────────────────────────────────────
                 if self.cfg.show_window:
-                    self._annotate(processed_frame, obs_info, turn_hint,
-                                   left_ratio, right_ratio, serial_msg, fps,
-                                   pp_active, len(path_points))
+                    self._annotate(processed_frame, steer_deg, obs_norm,
+                                   pp_active, len(path_points), positions,
+                                   serial_msg, fps)
 
                     if bev_frame is not None:
                         bev_debug = draw_bev_debug(

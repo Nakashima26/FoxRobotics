@@ -76,8 +76,8 @@ PP_STEER_GAIN     = MAX_STEER_DEG   # 35.0
 # ─── PID de fallback (igual que wro_runtime.py) ───────────────────────────────
 RED_TARGET_PX    = 140
 GREEN_TARGET_PX  = 500
-PID_KP           = 0.012
-PID_KD           = 0.004
+PID_KP           = 1.000
+PID_KD           = 0.33
 CORR_LIMIT_PX    = 160.0
 
 # ─── Cámara / captura ─────────────────────────────────────────────────────────

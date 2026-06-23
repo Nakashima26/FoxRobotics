@@ -187,8 +187,8 @@ def draw_bev_debug(
     for pt in path_points:
         cv2.circle(out, pt, 3, (0, 220, 220), -1)
 
-    # Punto look-ahead
-    if lookahead_pt is not None:
+    # Punto look-ahead — solo cuando PP está activo (evita mostrar punto obsoleto en modo fallback)
+    if lookahead_pt is not None and pp_active:
         lx, ly = int(lookahead_pt[0]), int(lookahead_pt[1])
         cv2.circle(out, (lx, ly), 8, (0, 220, 255), -1)
         cv2.circle(out, (lx, ly), 8, (0, 0, 0), 2)

@@ -90,11 +90,8 @@ const unsigned long piTimeoutMs = 800;  // ms sin mensaje → fallback
 float visionSteerGain = 80.0;
 float turnHintGain    = 7.0;
 
-// Ganancia Pure Pursuit: obs = steer_deg / 35 → outputVision = obs * 35 = steer_deg
+// Ganancia Pure Pursuit: obs = steer_deg / 35 → steerDeg = obs * 35 = steer_deg
 const float ppSteerGain = 35.0;
-
-// Reducción del gyro en modo PP (no necesita corrección tan agresiva)
-const float ppGyroFactor = 0.25;
 
 // ── Boot sincronización con Pi ────────────────────────────────────────────────
 bool piReadyReceived = false;
@@ -325,12 +322,23 @@ void controlPID(long distL, long distR) {
 
   } else if (piPurePursuit) {
     // ── Modo Pure Pursuit ────────────────────────────────────────────────────
-    // Pi ya calculó el ángulo de dirección óptimo (centerline + PP).
-    // obs = steer_deg / ppSteerGain  →  outputVision = obs * ppSteerGain = steer_deg
-    // Solo añadimos una corrección liviana de gyro para estabilizar en línea recta.
-    outputVision = obsBiasNorm * ppSteerGain;
-    float lightGyro = KpGyro * errorGyro * ppGyroFactor;
-    outputFinal = outputVision + lightGyro;
+    // La Pi ya calculó el ángulo de dirección óptimo siguiendo la centerline.
+    // obs = steer_deg / ppSteerGain  →  steerDeg = obs * ppSteerGain = steer_deg
+    //   steerDeg > 0 = derecha,  steerDeg < 0 = izquierda  (convención de la Pi).
+    float steerDeg = obsBiasNorm * ppSteerGain;
+    steerDeg = constrain(steerDeg, -ppSteerGain, ppSteerGain);  // rango completo ±35
+
+    // Servo en este robot (ver estado GIRANDO): 150 = izquierda, 20 = derecha,
+    // centro = 80.  Por eso para ir a la DERECHA hay que RESTAR del centro.
+    int servoAngle = centroServo - (int)steerDeg;
+    escribirServo(servoAngle);
+    setMotor(velocidadMotor);
+
+    // ── Debug UART ────────────────────────────────────────────────────────────
+    Serial.print(" | Mode:PP");
+    Serial.print(" | Steer:");  Serial.print(steerDeg);
+    Serial.print(" | Servo:");  Serial.print(servoAngle);
+    return;
 
   } else {
     // ── Modo V1: obstáculo / fallback PID ────────────────────────────────────
