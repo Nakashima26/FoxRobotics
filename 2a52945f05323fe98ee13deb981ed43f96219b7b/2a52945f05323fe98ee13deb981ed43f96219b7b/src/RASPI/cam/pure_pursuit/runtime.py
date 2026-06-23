@@ -384,8 +384,8 @@ class PPRuntime:
                 prio           = 1 if obs_info.get("priority", False) else 0
                 mem            = int(obs_info.get("memory_frames", 0))
 
-                # PP activo cuando: BEV calibrado Y sin prioridad de obstáculo activa
-                if self.bev.is_calibrated and not obs_info.get("priority", False):
+                # BEV siempre se computa si está calibrado (para visualización y centerline)
+                if self.bev.is_calibrated:
                     bev_frame = self.bev.warp(processed_frame)
 
                     # Proyectar obstáculos detectados al plano BEV
@@ -399,7 +399,8 @@ class PPRuntime:
                     # Detectar centerline en BEV
                     path_points = detect_centerline(bev_frame, bev_obstacles)
 
-                    if len(path_points) >= C.MIN_PATH_PTS:
+                    # PP activo solo cuando no hay prioridad de obstáculo
+                    if not obs_info.get("priority", False) and len(path_points) >= C.MIN_PATH_PTS:
                         steer_deg, lookahead_pt = self.controller.compute(
                             path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
                         )
