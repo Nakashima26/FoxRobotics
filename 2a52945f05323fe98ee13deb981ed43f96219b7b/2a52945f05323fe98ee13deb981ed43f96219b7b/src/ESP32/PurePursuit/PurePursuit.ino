@@ -93,6 +93,11 @@ float turnHintGain    = 7.0;
 // Ganancia Pure Pursuit: obs = steer_deg / 35 → steerDeg = obs * 35 = steer_deg
 const float ppSteerGain = 35.0;
 
+// Cuánto se deflecta el servo por cada grado de PP.  steerDeg sale de la
+// geometría (máx ±35°) y suele quedar corto para la mecánica del servo:
+// súbelo si el carrito gira poco, bájalo si oscila/sobregira.
+float ppServoGain = 1.8;
+
 // ── Boot sincronización con Pi ────────────────────────────────────────────────
 bool piReadyReceived = false;
 unsigned long bootStartMs = 0;
@@ -330,7 +335,8 @@ void controlPID(long distL, long distR) {
 
     // Servo en este robot (ver estado GIRANDO): 150 = izquierda, 20 = derecha,
     // centro = 80.  Por eso para ir a la DERECHA hay que RESTAR del centro.
-    int servoAngle = centroServo - (int)steerDeg;
+    int servoAngle = centroServo - (int)(steerDeg * ppServoGain);
+    servoAngle = constrain(servoAngle, 20, 150);   // límites físicos del servo
     escribirServo(servoAngle);
     setMotor(velocidadMotor);
 
