@@ -333,10 +333,9 @@ void controlPID(long distL, long distR) {
     float steerDeg = obsBiasNorm * ppSteerGain;
     steerDeg = constrain(steerDeg, -ppSteerGain, ppSteerGain);  // rango completo ±35
 
-    // En BEV el eje X viene del frame flippeado (cv2.flip), así que
-    // steerDeg > 0 = derecha en BEV = izquierda física → SUMAR al centro.
-    // 150 = izquierda física, 20 = derecha física, centro = 80.
-    int servoAngle = centroServo + (int)(steerDeg * ppServoGain);
+    // Servo en este robot (ver estado GIRANDO): 150 = izquierda, 20 = derecha,
+    // centro = 80.  Por eso para ir a la DERECHA hay que RESTAR del centro.
+    int servoAngle = centroServo - (int)(steerDeg * ppServoGain);
     servoAngle = constrain(servoAngle, 20, 150);   // límites físicos del servo
     escribirServo(servoAngle);
     setMotor(velocidadMotor);
