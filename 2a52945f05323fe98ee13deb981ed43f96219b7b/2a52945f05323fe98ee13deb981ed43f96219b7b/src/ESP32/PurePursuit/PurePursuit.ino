@@ -254,7 +254,10 @@ void parsePiMessage(String line) {
 
     piReady     = true;
     lastPiMsgMs = millis();
-    Serial2.println("ACK:V2");
+    // Regresamos el heading integrado del gyro para que la Pi pueda mantener
+    // su mapa rodante de obstáculos alineado al doblar (obstacle_memory.py).
+    Serial2.print("ACK:V2,ang=");
+    Serial2.println(anguloGyro, 2);
     return;
   }
 

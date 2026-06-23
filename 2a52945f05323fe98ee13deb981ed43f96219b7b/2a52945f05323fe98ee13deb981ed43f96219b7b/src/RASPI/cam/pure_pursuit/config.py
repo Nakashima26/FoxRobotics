@@ -68,6 +68,18 @@ WHEELBASE_PX   = 50.0    # batalla del vehículo en px BEV   (= 100 mm)
 MAX_STEER_DEG  = 35.0    # límite mecánico del servo en grados
 MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 
+# ─── Memoria de obstáculos (mapa rodante disperso) — obstacle_memory.py ───────
+# El robot recuerda las latas vistas y las "arrastra" hacia sí mismo cuadro a
+# cuadro usando avance asumido (velocidad) + giro del IMU (anguloGyro del ESP32),
+# para no perder la inflación cuando la lata sale del campo de visión.
+ROBOT_SPEED_MMS    = 350.0   # velocidad de marcha asumida (mm/s). Ajustar al carro real.
+OBS_MEM_MATCH_PX   = 30.0    # radio para fusionar una detección nueva con una recordada (px BEV)
+OBS_MEM_DECAY      = 0.12    # confianza perdida por frame sin re-ver el obstáculo (0..1)
+OBS_MEM_MIN_CONF   = 0.15    # por debajo de esto el obstáculo recordado se descarta
+OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
+OBS_MEM_BEHIND_PAD = 10      # px: tirar el obstáculo cuando queda detrás del robot (bev_y > robot_y + pad)
+OBS_MEM_MAX        = 12      # tope de obstáculos recordados (seguridad)
+
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=35  →  obs=steer_deg/35
 # Cuando pp=0:  ESP32 usa visionSteerGain=80  (comportamiento V1 actual)
