@@ -63,7 +63,7 @@ OBS_BIAS_SHIFT = 28    # desplazamiento lateral para sesgo de color WRO (px)
 #  Verde → el robot debe pasar por la IZQUIERDA → se infla más a la derecha
 
 # ─── Pure Pursuit ─────────────────────────────────────────────────────────────
-LOOKAHEAD_PX   = 140.0    # distancia look-ahead en px BEV  (= 160 mm)
+LOOKAHEAD_PX   = 100.0    # distancia look-ahead en px BEV  (= 160 mm)
 WHEELBASE_PX   = 50.0    # batalla del vehículo en px BEV   (= 100 mm)
 MAX_STEER_DEG  = 35.0    # límite mecánico del servo en grados
 MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
