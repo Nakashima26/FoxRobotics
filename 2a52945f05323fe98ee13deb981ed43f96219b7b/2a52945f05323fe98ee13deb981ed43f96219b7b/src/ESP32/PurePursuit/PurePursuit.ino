@@ -478,14 +478,15 @@ void loop() {
       controlPID(distL, distR);
 
       // No girar si hay obstáculo activo en Pi
-      bool esquivandoFuerte = abs(obsBiasNorm) > 0.5;
-      bool bloqueadoPorObstaculo = piPriority || (piMemoryFrames > 0) || esquivandoFuerte;
+      const float headingSettleDeg = 13.0;   // ajusta según qué tan estricto quieras ser
+      bool headingAligned = abs(errorGyro) < headingSettleDeg;
+
+      bool bloqueadoPorObstaculo = piPriority || (piMemoryFrames > 0) || !headingAligned;
 
       if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo
           && detectarEsquina(distL, distR)
-          && millis() > 9000
-          && anguloGyro > 20) 
+          && millis() > 9000) 
       {
         estado     = GIRANDO;
         anguloGyro = 0;

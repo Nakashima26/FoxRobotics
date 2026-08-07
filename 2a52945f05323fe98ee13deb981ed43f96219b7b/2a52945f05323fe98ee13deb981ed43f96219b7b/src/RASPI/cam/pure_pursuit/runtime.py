@@ -88,6 +88,8 @@ class PPRuntime:
     """
 
     def __init__(self, cfg: PPConfig):
+        self._last_bev_obstacles = []
+
         self.cfg = cfg
 
         # Visión
@@ -120,11 +122,10 @@ class PPRuntime:
     # ── Serial ────────────────────────────────────────────────────────────────
 
     def _build_serial_message(self, obs_norm: float, state: str) -> str:
-        # En modo Pure Pursuit puro: turn/prio/mem no aplican (el ESP gira por
-        # ultrasónicos).  pp=1 siempre para que el ESP use ppSteerGain.
-        avoiding = abs(obs_norm) > 0.5
+        # prio=1 solo si REALMENTE hay un obstáculo detectado cerca, no por steer alto
+        has_obstacle = len(self._last_bev_obstacles) > 0  # ver nota abajo
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
-                f"state={state},prio={int(avoiding)},mem=0,pp=1")
+                f"state={state},prio={int(has_obstacle)},mem=0,pp=1")
 
     # ── Captura ───────────────────────────────────────────────────────────────
 
@@ -279,6 +280,17 @@ class PPRuntime:
 
                 # Sin línea válida → recto (obs=0).  En teoría siempre hay línea.
                 state = "pp_follow" if pp_active else "no_path"
+
+                bev_obstacles = []
+                for color_name in ("Red", "Green"):
+                    for obj in positions.get(color_name, []):
+                        ...
+                        bev_obstacles.append(...)
+
+                # ← agrega esta línea aquí
+                self._last_bev_obstacles = bev_obstacles
+
+                path_points = detect_centerline(bev_frame, bev_obstacles)
 
                 # ── Construir y enviar mensaje serial ────────────────────────
                 serial_msg = self._build_serial_message(obs_norm, state)
