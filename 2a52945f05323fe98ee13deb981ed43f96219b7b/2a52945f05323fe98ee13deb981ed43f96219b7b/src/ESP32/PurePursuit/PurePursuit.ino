@@ -141,7 +141,7 @@ void escribirServo(int angulo) {
 }
 
 void setMotor(int velocidad) {
-  velocidad = constrain(velocidad, 0, 255);
+  velocidad = constrain(velocidad, 0, 100);
   ledcWrite(PWMA, velocidad);
 }
 
@@ -478,12 +478,14 @@ void loop() {
       controlPID(distL, distR);
 
       // No girar si hay obstáculo activo en Pi
-      bool bloqueadoPorObstaculo = piPriority || (piMemoryFrames > 0);
+      bool esquivandoFuerte = abs(obsBiasNorm) > 0.5;
+      bool bloqueadoPorObstaculo = piPriority || (piMemoryFrames > 0) || esquivandoFuerte;
 
       if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo
           && detectarEsquina(distL, distR)
-          && millis() > 9000)
+          && millis() > 9000
+          && anguloGyro > 20) 
       {
         estado     = GIRANDO;
         anguloGyro = 0;

@@ -122,8 +122,9 @@ class PPRuntime:
     def _build_serial_message(self, obs_norm: float, state: str) -> str:
         # En modo Pure Pursuit puro: turn/prio/mem no aplican (el ESP gira por
         # ultrasónicos).  pp=1 siempre para que el ESP use ppSteerGain.
+        avoiding = abs(obs_norm) > 0.5
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
-                f"state={state},prio=0,mem=0,pp=1")
+                f"state={state},prio={int(avoiding)},mem=0,pp=1")
 
     # ── Captura ───────────────────────────────────────────────────────────────
 
