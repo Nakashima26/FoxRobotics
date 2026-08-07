@@ -1,4 +1,4 @@
-# Pure Pursuit — Instrucciones de uso
+ # Pure Pursuit — Instrucciones de uso
 
 Todos los comandos se corren desde `src/RASPI/cam/`.
 
