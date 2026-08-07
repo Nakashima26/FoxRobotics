@@ -4,6 +4,10 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
 
 # Virtual environment
 .venv/
@@ -18,6 +22,11 @@ env/
 .idea/
 *.DS_Store
 Thumbs.db
+*.swp
+*.swo
+*.tmp
+*.bak
+*.orig
 
 # Arduino build artifacts
 build/
@@ -32,3 +41,7 @@ build/
 
 # Logs
 *.log
+
+# Generated backups and archives
+**/*-backups/*.zip
+**/*-backups/*.bak
