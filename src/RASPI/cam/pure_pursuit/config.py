@@ -80,6 +80,17 @@ OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
 OBS_MEM_BEHIND_PAD = 10      # px: tirar el obstáculo cuando queda detrás del robot (bev_y > robot_y + pad)
 OBS_MEM_MAX        = 12      # tope de obstáculos recordados (seguridad)
 
+# ─── Hint direccional (obstáculo lejano, fuera de rango BEV) ─────────────────
+# Un objeto rojo/verde detectado en la imagen de cámara CRUDA (no en BEV) que
+# todavía no proyecta dentro del rango calibrado.  Se usa SOLO para empezar a
+# centrar el steer con anticipación.
+FAR_HINT_ENABLED     = True
+FAR_HINT_MIN_AREA_PX = 1200    # área mínima del bbox en cámara para confiar (ruido/falsos positivos)
+FAR_HINT_MAX_STEER   = 12.0     # grados máx que puede aportar el hint (<< MAX_STEER_DEG)
+FAR_HINT_KP          = 0.015   # ganancia proporcional: grados por px de offset
+FAR_HINT_KD          = 0.004   # ganancia derivativa: amortigua saltos por ruido de detección
+CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
+
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=35  →  obs=steer_deg/35
 # Cuando pp=0:  ESP32 usa visionSteerGain=80  (comportamiento V1 actual)

@@ -45,6 +45,7 @@ from .bev import BEVTransformer
 from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
+from .far_hint import FarHintManager
 from . import config as C
 
 
@@ -100,7 +101,10 @@ class PPRuntime:
         self.bev        = BEVTransformer(cfg.calib_path)
         self.controller = PurePursuitController()
         self.memory     = ObstacleMemory()
-
+        self.controller = PurePursuitController()
+        self.memory     = ObstacleMemory()
+        self.far_hint   = FarHintManager()
+        
         # Estado de la memoria rodante
         self._last_heading: float | None = None
         self._last_update_t: float | None = None
@@ -271,16 +275,23 @@ class PPRuntime:
                     try:
                         bev_frame = self.bev.warp(processed_frame)
 
-                        # Proyectar obstáculos detectados al plano BEV
+                        # Proyectar obstáculos detectados al plano BEV, y
+                        # separar los que NO proyectaron (candidatos a hint lejano)
                         new_obstacles = []
+                        far_objects   = []   # (center_x, w, h, color) — fuera de BEV
                         for color_name in ("Red", "Green"):
                             for obj in positions.get(color_name, []):
                                 x, y, w, h = obj
                                 result = map_obstacle_to_bev(self.bev, x, y, w, h)
                                 if result is not None:
                                     new_obstacles.append((result[0], result[1], color_name))
+                                else:
+                                    # No proyectó (fuera de bev_in_bounds o
+                                    # cam_to_bev falló) → tratar como lejano
+                                    far_objects.append((x + w / 2.0, w, h, color_name))
 
                         # ── Memoria rodante: fusiona lo nuevo con lo recordado ──
+                        # (Solo con obstáculos BEV reales — el far_hint NO entra aquí)
                         bev_obstacles = self.memory.update(
                             new_obstacles, dt_s, self._last_heading
                         )
@@ -292,12 +303,31 @@ class PPRuntime:
                             steer_deg, lookahead_pt = self.controller.compute(
                                 path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
                             )
-                            obs_norm  = self.controller.normalize(steer_deg)
                             pp_active = True
+
+                        # ── Hint direccional: solo suma al steer, nunca a prio/mem ──
+                        far_hint_deg = 0.0
+                        if C.FAR_HINT_ENABLED:
+                            bev_obstacle_active = len(bev_obstacles) > 0
+                            if not bev_obstacle_active:
+                                far_hint_deg = self.far_hint.compute(far_objects)
+                                if pp_active:
+                                    steer_deg = max(-C.MAX_STEER_DEG,
+                                                     min(C.MAX_STEER_DEG,
+                                                         steer_deg + far_hint_deg))
+                            else:
+                                # Hay un obstáculo BEV real activo → el hint no
+                                # debe competir con la esquiva geométrica precisa.
+                                self.far_hint.reset_all()
+                        if pp_active:
+                            obs_norm = self.controller.normalize(steer_deg)
+                            
                     except Exception as e:
                         import traceback
                         print(f"[ERROR] {e}", flush=True)
                         traceback.print_exc()
+                else:
+                    self.far_hint.reset_all()
 
                 # Sin línea válida → recto (obs=0).
                 state = "pp_follow" if pp_active else "no_path"
