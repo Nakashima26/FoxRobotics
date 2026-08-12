@@ -317,29 +317,30 @@ class PPRuntime:
                     log_line += f" | RX: {serial_ack}"
                 print(log_line, flush=True)
 
+                
                 # ── Display ──────────────────────────────────────────────────
+                self._annotate(processed_frame, steer_deg, obs_norm,
+                            pp_active, len(path_points), positions,
+                            serial_msg, fps, len(bev_obstacles))
+
+                if bev_frame is not None:
+                    bev_debug = draw_bev_debug(
+                        bev_frame, path_points, lookahead_pt,
+                        bev_obstacles, steer_deg, pp_active,
+                    )
+                    bev_h = processed_frame.shape[0]
+                    bev_small = cv2.resize(bev_debug, (bev_h, bev_h))
+                    combined = np.hstack([processed_frame, bev_small])
+                else:
+                    combined = processed_frame
+
                 if self.cfg.show_window:
-                    self._annotate(processed_frame, steer_deg, obs_norm,
-                                   pp_active, len(path_points), positions,
-                                   serial_msg, fps, len(bev_obstacles))
-
-                    if bev_frame is not None:
-                        bev_debug = draw_bev_debug(
-                            bev_frame, path_points, lookahead_pt,
-                            bev_obstacles, steer_deg, pp_active,
-                        )
-                        bev_h = processed_frame.shape[0]
-                        bev_small = cv2.resize(bev_debug, (bev_h, bev_h))
-                        combined = np.hstack([processed_frame, bev_small])
-                        cv2.imshow("WRO Pure Pursuit + Memoria", combined)
-                    else:
-                        cv2.imshow("WRO Pure Pursuit + Memoria", processed_frame)
-
+                    cv2.imshow("WRO Pure Pursuit + Memoria", combined)
                     if cv2.waitKey(1) & 0xFF == 27:
                         break
 
                 self._maybe_record(processed_frame, fps)
-                self._write_cam_frame(processed_frame)
+                self._write_cam_frame(combined)   # ← ahora manda cámara + BEV/ruta
 
         finally:
             if self.frame_grabber is not None:

@@ -123,7 +123,7 @@ def get_cam_overlay():
         with open(CAM_FRAME_PATH, "rb") as f:
             data = f.read()
         cam_img = Image.open(io.BytesIO(data)).convert("RGB")
-        return cam_img.resize((FRAME_SIZE[0] // 4, FRAME_SIZE[1] // 4), Image.LANCZOS)
+        return cam_img.resize((FRAME_SIZE[0] // 2, FRAME_SIZE[1] // 2), Image.LANCZOS)
     except Exception:
         return None
 
