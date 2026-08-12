@@ -69,7 +69,7 @@ class Vision:
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         objects = []
 
-        MIN_SOLIDITY = 0.55   # blob compacto (lata) ~0.7-0.9; línea delgada suele ser < 0.4
+        MIN_SOLIDITY = 0.2   # blob compacto (lata) ~0.7-0.9; línea delgada suele ser < 0.4
         MAX_ASPECT   = 2.2    # w/h o h/w máximo permitido antes de considerarlo "línea"
 
         for cnt in contours:
