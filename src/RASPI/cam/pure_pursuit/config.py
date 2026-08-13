@@ -32,15 +32,44 @@ ROBOT_BEV_Y = BEV_H - 20   # 380
 # x_mm: lateral  (+ = derecha del robot)
 # y_mm: distancia hacia adelante desde el eje delantero
 #
-# Coloca marcadores físicos en el suelo en estas posiciones exactas y
-# haz clic en ellos en el mismo orden dentro de calibrate.py:
-#   A → izq-cerca    B → der-cerca    C → izq-lejos    D → der-lejos
+# IMPORTANTE — por qué 9 puntos y no 4:
+#   Una homografía con exactamente 4 puntos es un ajuste EXACTO: no hay forma
+#   de detectar ni corregir un clic impreciso durante la calibración, y la
+#   transformación se vuelve muy poco confiable fuera del área que cubren esos
+#   4 puntos (extrapolación agresiva).  Con 9 puntos en grilla 3×3,
+#   cv2.findHomography(..., RANSAC) puede promediar/filtrar el ruido de los
+#   clics, y el área cubierta coincide con el rango real que usa
+#   centerline.py (desde muy cerca del robot hasta ~550mm adelante).
+#
+#   Coloca marcadores físicos en el suelo en estas posiciones exactas y haz
+#   clic en ellos EN ESTE MISMO ORDEN dentro de calibrate.py.
+#
+#          izquierda        centro         derecha
+#   lejos:   P7 (-220,550)  P8 (0,550)   P9 (220,550)
+#   media:   P4 (-150,300)  P5 (0,300)   P6 (150,300)
+#   cerca:   P1  (-80, 80)  P2 (0, 80)   P3  (80, 80)
 CALIB_REAL_MM = np.float32([
-    [ -60.0, 200.0],   # A: 20 cm adelante,  6 cm izquierda
-    [  60.0, 200.0],   # B: 20 cm adelante,  6 cm derecha
-    [-150.0, 380.0],   # C: 38 cm adelante, 15 cm izquierda
-    [ 150.0, 380.0],   # D: 38 cm adelante, 15 cm derecha
+    [ -80.0,  80.0],   # P1: cerca-izquierda
+    [   0.0,  80.0],   # P2: cerca-centro
+    [  80.0,  80.0],   # P3: cerca-derecha
+    [-150.0, 300.0],   # P4: media-izquierda
+    [   0.0, 300.0],   # P5: media-centro
+    [ 150.0, 300.0],   # P6: media-derecha
+    [-220.0, 550.0],   # P7: lejos-izquierda
+    [   0.0, 550.0],   # P8: lejos-centro
+    [ 220.0, 550.0],   # P9: lejos-derecha
 ])
+
+# Etiquetas legibles para cada punto (mismo orden que CALIB_REAL_MM)
+CALIB_POINT_LABELS = [
+    "P1 cerca-izq", "P2 cerca-centro", "P3 cerca-der",
+    "P4 media-izq", "P5 media-centro", "P6 media-der",
+    "P7 lejos-izq", "P8 lejos-centro", "P9 lejos-der",
+]
+
+# Umbral de error medio de reproyección (px BEV) a partir del cual calibrate.py
+# advierte que probablemente un clic quedó mal puesto.
+CALIB_MAX_MEAN_ERR_PX = 4.0
 
 # ─── Color del piso (HSV) — tapete WRO: beige / madera cálida ────────────────
 FLOOR_LOWER = np.array([0,   0,  40])
@@ -63,7 +92,7 @@ OBS_BIAS_SHIFT = 28    # desplazamiento lateral para sesgo de color WRO (px)
 #  Verde → el robot debe pasar por la IZQUIERDA → se infla más a la derecha
 
 # ─── Pure Pursuit ─────────────────────────────────────────────────────────────
-LOOKAHEAD_PX   = 180.0    # distancia look-ahead en px BEV  (= 160 mm)
+LOOKAHEAD_PX   = 100.0    # distancia look-ahead en px BEV  (= 160 mm)
 WHEELBASE_PX   = 50.0    # batalla del vehículo en px BEV   (= 100 mm)
 MAX_STEER_DEG  = 35.0    # límite mecánico del servo en grados
 MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
