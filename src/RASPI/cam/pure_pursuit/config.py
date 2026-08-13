@@ -63,40 +63,15 @@ OBS_BIAS_SHIFT = 28    # desplazamiento lateral para sesgo de color WRO (px)
 #  Verde → el robot debe pasar por la IZQUIERDA → se infla más a la derecha
 
 # ─── Pure Pursuit ─────────────────────────────────────────────────────────────
+LOOKAHEAD_PX   = 180.0    # distancia look-ahead en px BEV  (= 160 mm)
 WHEELBASE_PX   = 50.0    # batalla del vehículo en px BEV   (= 100 mm)
 MAX_STEER_DEG  = 50.0    # límite mecánico del servo en grados
 MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 
-# ─── Lookahead dinámico ───────────────────────────────────────────────────────
-# Un solo LOOKAHEAD_PX fijo obliga a elegir entre "reacciona rápido de cerca"
-# (valor bajo) y "ve lejos para corregir suave hacia la pared" (valor alto) —
-# no puede hacer ambas cosas bien. Con obstáculos cerca y descentrados, un
-# lookahead largo hace que Pure Pursuit "salte" el punto de esquive forzado
-# (que queda cerca del robot) y agarre un punto ya del otro lado del
-# obstáculo, ignorando la maniobra necesaria.
-#
-# dynamic_lookahead() en controller.py interpola entre estos dos valores según
-# qué tan cerca esté el obstáculo más próximo en bev_obstacles.
-LOOKAHEAD_NEAR_PX      = 90.0     # obstáculo pegadísimo → reacciona YA
-LOOKAHEAD_FAR_PX       = 180.0    # sin obstáculos → ve lejos, corrige suave
-OBS_LOOKAHEAD_MIN_DIST = 60.0     # px BEV: a esta distancia o menos, usa LOOKAHEAD_NEAR_PX
-OBS_LOOKAHEAD_MAX_DIST = 220.0    # px BEV: a esta distancia o más, ya usa LOOKAHEAD_FAR_PX
-
-# Se mantiene por compatibilidad con código que todavía use la constante fija.
-LOOKAHEAD_PX = LOOKAHEAD_FAR_PX
-
-# ─── Esquive de emergencia (path insuficiente pero obstáculo conocido) ───────
-# Si detect_centerline() no logra armar MIN_PATH_PTS puntos (típico cuando el
-# obstáculo está muy cerca y descentrado — la franja de piso libre visible es
-# angosta o cae en la zona no-calibrada cerca del robot), NO hay que mandar
-# obs=0 a ciegas.  emergency_avoid_steer() calcula el steer directo desde la
-# posición del obstáculo en bev_obstacles, sin depender de segmentar piso libre.
-EMERGENCY_AVOID_ENABLED = True
-
 # ─── Memoria de obstáculos (mapa rodante disperso) — obstacle_memory.py ───────
-# El robot recuerda las latas vistas y las "arrastra" hacia sí cuadro a cuadro
-# usando avance asumido (velocidad) + giro del IMU (anguloGyro del ESP32), para
-# no perder la inflación cuando la lata sale del campo de visión.
+# El robot recuerda las latas vistas y las "arrastra" hacia sí mismo cuadro a
+# cuadro usando avance asumido (velocidad) + giro del IMU (anguloGyro del ESP32),
+# para no perder la inflación cuando la lata sale del campo de visión.
 ROBOT_SPEED_MMS    = 350.0   # velocidad de marcha asumida (mm/s). Ajustar al carro real.
 OBS_MEM_MATCH_PX   = 30.0    # radio para fusionar una detección nueva con una recordada (px BEV)
 OBS_MEM_DECAY      = 0.12    # confianza perdida por frame sin re-ver el obstáculo (0..1)
@@ -104,19 +79,6 @@ OBS_MEM_MIN_CONF   = 0.15    # por debajo de esto el obstáculo recordado se des
 OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
 OBS_MEM_BEHIND_PAD = 10      # px: tirar el obstáculo cuando queda detrás del robot (bev_y > robot_y + pad)
 OBS_MEM_MAX        = 12      # tope de obstáculos recordados (seguridad)
-
-# ─── Esquive de "esquina" (objeto cerca en cámara cruda, fuera del BEV) ──────
-# Un objeto puede estar claramente cerca (bbox abajo en el frame de cámara)
-# pero NO proyectar al BEV porque cae fuera del área que cubre la homografía
-# calibrada (típico cuando el objeto está en una esquina extrema lateral,
-# muy cerca del robot).  Antes esto se trataba igual que un objeto genuinamente
-# lejano (far_hint, tope blando de FAR_HINT_MAX_STEER=12°) — insuficiente.
-# CORNER_FOOT_Y_THRESHOLD separa "cerca pero sin proyectar" (esquive fuerte)
-# de "genuinamente lejos" (far_hint suave).
-#
-# Ajusta este valor viendo test_vision.py: fíjate en qué valor de (y+h) del
-# bbox en cámara corresponde a objetos que ya están a ~20-30cm del robot.
-CORNER_FOOT_Y_THRESHOLD = 340    # px de cámara (resolución de proceso 640×480)
 
 # ─── Hint direccional (obstáculo lejano, fuera de rango BEV) ─────────────────
 # Un objeto rojo/verde detectado en la imagen de cámara CRUDA (no en BEV) que

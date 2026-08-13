@@ -135,14 +135,11 @@ def detect_centerline(
                 if color == "Red":
                     # Buscar centro del espacio libre a la derecha del obstáculo
                     cx_rel = _widest_free_segment(free_mask[y, iox:], pref_min)
-                    # Fallback: si no hay segmento libre suficientemente ancho,
-                    # usar el radio de seguridad INFLADO (no el físico) para
-                    # nunca forzar un punto pegado al borde real de la lata.
-                    forced_cx = (iox + cx_rel) if cx_rel is not None else iox + C.OBS_INFLATE_R
+                    forced_cx = (iox + cx_rel) if cx_rel is not None else iox + C.OBS_PHYSICAL_R_PX
                 elif color == "Green":
                     # Buscar centro del espacio libre a la izquierda del obstáculo
                     cx_abs = _widest_free_segment(free_mask[y, :iox], pref_min)
-                    forced_cx = cx_abs if cx_abs is not None else iox - C.OBS_INFLATE_R
+                    forced_cx = cx_abs if cx_abs is not None else iox - C.OBS_PHYSICAL_R_PX
                 break
 
         if forced_cx is not None:
@@ -164,7 +161,6 @@ def draw_bev_debug(
     bev_obstacles: list[tuple[float, float, str]],
     steer_deg: float = 0.0,
     pp_active: bool = False,
-    lookahead_px: float | None = None,
 ) -> np.ndarray:
     """
     Dibuja sobre la imagen BEV:
@@ -202,9 +198,8 @@ def draw_bev_debug(
     cv2.circle(out, (rx, ry), 9, (255, 80, 0), -1)
     cv2.arrowedLine(out, (rx, ry), (rx, ry - 25), (255, 255, 255), 2, tipLength=0.35)
 
-    # Radio look-ahead (dinámico: cambia según qué tan cerca esté el obstáculo)
-    lk = lookahead_px if lookahead_px is not None else C.LOOKAHEAD_FAR_PX
-    cv2.circle(out, (rx, ry), int(lk), (60, 60, 60), 1)
+    # Radio look-ahead
+    cv2.circle(out, (rx, ry), int(C.LOOKAHEAD_PX), (60, 60, 60), 1)
 
     # Estado
     mode_txt = f"PP  steer={steer_deg:+.1f}deg" if pp_active else "FALLBACK PID"
