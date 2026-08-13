@@ -201,11 +201,7 @@ def close_range_boost(
     same_direction = (steer_deg == 0.0) or (alt == 0.0) or (
         (steer_deg > 0) == (alt > 0)
     )
-    # Solo reemplaza si el steer de emergencia es CLARAMENTE mayor (+20%),
-    # para no saltar de un valor a otro por diferencias chicas justo en el
-    # borde de CLOSE_RANGE_BOOST_DIST_PX (eso se sentía como un giro brusco
-    # de más).
-    if same_direction and abs(alt) > abs(steer_deg) * 1.20:
+    if same_direction and abs(alt) > abs(steer_deg):
         return alt
     return steer_deg
 

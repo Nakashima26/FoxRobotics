@@ -95,12 +95,7 @@ LOOKAHEAD_PX = LOOKAHEAD_FAR_PX
 # no depende del lookahead) y se usa el que tenga mayor magnitud, siempre que
 # ambos indiquen la misma dirección.
 CLOSE_RANGE_BOOST_ENABLED = True
-CLOSE_RANGE_BOOST_DIST_PX = 75.0   # px BEV (~15cm) — por debajo de esto se activa el refuerzo.
-# OJO: si lo subes, empieza a competir con pp_follow en rango medio (20-40cm)
-# donde el centerline normal ya calcula bien -> giros más fuertes de lo
-# necesario. Súbelo solo si ves que el refuerzo deja de activarse antes de
-# que haga falta (revisa el log: steer_deg debería subir justo cuando el
-# obstáculo esté MUY cerca, no antes).
+CLOSE_RANGE_BOOST_DIST_PX = 110.0   # px BEV (~22cm) — por debajo de esto se activa el refuerzo
 
 # ─── Esquive de emergencia (path insuficiente pero obstáculo conocido) ───────
 # Si detect_centerline() no logra armar MIN_PATH_PTS puntos (típico cuando el
