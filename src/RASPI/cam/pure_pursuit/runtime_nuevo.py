@@ -56,7 +56,6 @@ from .controller import (
     dynamic_lookahead,
     emergency_avoid_steer,
     corner_avoid_steer,
-    close_range_boost,
 )
 from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
@@ -328,13 +327,6 @@ class PPRuntime:
                             steer_deg, lookahead_pt = self.controller.compute(
                                 path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y,
                                 lookahead_px=lk_used,
-                            )
-                            # Refuerzo para rango muy cercano (zona no
-                            # calibrada de la homografía, <~22cm): si el
-                            # esquive geométrico directo pide más ángulo que
-                            # el que salió del lookahead, usa ese.
-                            steer_deg = close_range_boost(
-                                steer_deg, bev_obstacles, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
                             )
                             pp_active = True
                             state = "pp_follow"

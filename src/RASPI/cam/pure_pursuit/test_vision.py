@@ -36,7 +36,6 @@ from .controller import (
     dynamic_lookahead,
     emergency_avoid_steer,
     corner_avoid_steer,
-    close_range_boost,
 )
 from . import config as C
 
@@ -146,7 +145,6 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
             steer_deg, lookahead_pt = controller.compute(
                 path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y, lookahead_px=lk_used
             )
-            steer_deg = close_range_boost(steer_deg, bev_obstacles, C.ROBOT_BEV_X, C.ROBOT_BEV_Y)
             pp_active = True
             state = "pp_follow"
 
