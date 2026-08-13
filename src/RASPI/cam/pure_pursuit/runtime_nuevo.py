@@ -7,11 +7,19 @@ avance asumido (velocidad) + giro del IMU (anguloGyro que el ESP32 ahora regresa
 en el ACK:V2).  Así la inflación de la lata no desaparece cuando ésta sale del
 campo de visión, y el carro deja de cortarse sobre ella.
 
-Diferencias vs runtime.py:
-  • self.memory = ObstacleMemory()
-  • parsea ang=<heading> del ACK:V2 del ESP32
-  • antes de detect_centerline, fusiona detecciones nuevas con la memoria
-  • el heading usado va con 1 frame de retraso (el ACK llega tras enviar) — irrelevante
+Sobre esta versión (obstáculos cerca + descentrados):
+  • Lookahead dinámico (controller.dynamic_lookahead): corto si hay un
+    obstáculo cerca, largo si no hay nada — antes un solo valor fijo hacía
+    que Pure Pursuit "saltara" el punto de esquive forzado cuando el
+    obstáculo estaba cerca.
+  • Esquive de emergencia (controller.emergency_avoid_steer): si
+    detect_centerline() no logra armar path (típico con obstáculo muy cerca
+    y descentrado) pero SÍ hay un obstáculo en memoria, se calcula el steer
+    directo por geometría en vez de mandar obs=0 a ciegas.
+  • Esquive de "esquina" (controller.corner_avoid_steer): objetos que la
+    cámara ve claramente cerca (parte baja del frame) pero que no proyectan
+    al BEV porque caen fuera del área calibrada de la homografía — antes se
+    trataban igual que un objeto genuinamente lejano (far_hint, tope de 12°).
 
 Para correrlo:
   python -m pure_pursuit.runtime_nuevo
@@ -43,7 +51,12 @@ from wro_runtime import (
 
 from .bev import BEVTransformer
 from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
-from .controller import PurePursuitController
+from .controller import (
+    PurePursuitController,
+    dynamic_lookahead,
+    emergency_avoid_steer,
+    corner_avoid_steer,
+)
 from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
 from . import config as C
@@ -101,10 +114,8 @@ class PPRuntime:
         self.bev        = BEVTransformer(cfg.calib_path)
         self.controller = PurePursuitController()
         self.memory     = ObstacleMemory()
-        self.controller = PurePursuitController()
-        self.memory     = ObstacleMemory()
         self.far_hint   = FarHintManager()
-        
+
         # Estado de la memoria rodante
         self._last_heading: float | None = None
         self._last_update_t: float | None = None
@@ -189,10 +200,11 @@ class PPRuntime:
         serial_msg:   str,
         fps:          float,
         n_mem:        int,
+        state:        str,
     ):
         lines = [
             f"fps={fps:.1f}  pp={'ON' if pp_active else 'OFF'}  pts={n_path_pts}",
-            f"steer={steer_deg:+.1f} deg  obs={obs_norm:+.3f}",
+            f"steer={steer_deg:+.1f} deg  obs={obs_norm:+.3f}  state={state}",
             f"obs_R={len(positions.get('Red', []))}  obs_G={len(positions.get('Green', []))}  mem={n_mem}",
             f"tx: {serial_msg[:55]}",
         ]
@@ -263,22 +275,29 @@ class PPRuntime:
                 processed_frame, positions = self.vision.process_frame(frame)
 
                 # ── Pipeline Pure Pursuit ────────────────────────────────────
-                steer_deg     = 0.0
-                obs_norm      = 0.0
-                lookahead_pt  = (float(C.ROBOT_BEV_X), float(C.ROBOT_BEV_Y))
-                path_points   = []
-                bev_frame     = None
-                bev_obstacles = []
-                pp_active     = False
+                steer_deg      = 0.0
+                obs_norm       = 0.0
+                lookahead_pt   = (float(C.ROBOT_BEV_X), float(C.ROBOT_BEV_Y))
+                path_points    = []
+                bev_frame      = None
+                bev_obstacles  = []
+                pp_active      = False
+                lk_used        = C.LOOKAHEAD_FAR_PX
+                state          = "no_path"
 
                 if self.bev.is_calibrated:
                     try:
                         bev_frame = self.bev.warp(processed_frame)
 
-                        # Proyectar obstáculos detectados al plano BEV, y
-                        # separar los que NO proyectaron (candidatos a hint lejano)
-                        new_obstacles = []
-                        far_objects   = []   # (center_x, w, h, color) — fuera de BEV
+                        # Proyectar obstáculos detectados al plano BEV.
+                        # Los que NO proyectan se separan en dos grupos:
+                        #   close_unprojected: el bbox está abajo en el frame
+                        #     (cerca) pero cayó fuera del área calibrada del
+                        #     BEV -> típico de esquina extrema del frame.
+                        #   far_objects: genuinamente lejos -> far_hint suave.
+                        new_obstacles     = []
+                        far_objects       = []
+                        close_unprojected = []
                         for color_name in ("Red", "Green"):
                             for obj in positions.get(color_name, []):
                                 x, y, w, h = obj
@@ -286,12 +305,13 @@ class PPRuntime:
                                 if result is not None:
                                     new_obstacles.append((result[0], result[1], color_name))
                                 else:
-                                    # No proyectó (fuera de bev_in_bounds o
-                                    # cam_to_bev falló) → tratar como lejano
-                                    far_objects.append((x + w / 2.0, w, h, color_name))
+                                    foot_y = y + h
+                                    if foot_y >= C.CORNER_FOOT_Y_THRESHOLD:
+                                        close_unprojected.append((x + w / 2.0, w, h, color_name))
+                                    else:
+                                        far_objects.append((x + w / 2.0, w, h, color_name))
 
                         # ── Memoria rodante: fusiona lo nuevo con lo recordado ──
-                        # (Solo con obstáculos BEV reales — el far_hint NO entra aquí)
                         bev_obstacles = self.memory.update(
                             new_obstacles, dt_s, self._last_heading
                         )
@@ -300,37 +320,56 @@ class PPRuntime:
                         path_points = detect_centerline(bev_frame, bev_obstacles)
 
                         if len(path_points) >= C.MIN_PATH_PTS:
+                            # ── Caso normal: hay path suficiente ──────────────
+                            lk_used = dynamic_lookahead(
+                                bev_obstacles, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
+                            )
                             steer_deg, lookahead_pt = self.controller.compute(
-                                path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
+                                path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y,
+                                lookahead_px=lk_used,
                             )
                             pp_active = True
+                            state = "pp_follow"
 
-                        # ── Hint direccional: solo suma al steer, nunca a prio/mem ──
-                        far_hint_deg = 0.0
-                        if C.FAR_HINT_ENABLED:
-                            bev_obstacle_active = len(bev_obstacles) > 0
-                            if not bev_obstacle_active:
-                                far_hint_deg = self.far_hint.compute(far_objects)
-                                if pp_active:
-                                    steer_deg = max(-C.MAX_STEER_DEG,
-                                                     min(C.MAX_STEER_DEG,
-                                                         steer_deg + far_hint_deg))
-                            else:
-                                # Hay un obstáculo BEV real activo → el hint no
-                                # debe competir con la esquiva geométrica precisa.
-                                self.far_hint.reset_all()
+                        elif bev_obstacles and C.EMERGENCY_AVOID_ENABLED:
+                            # ── Hay obstáculo en memoria pero el path falló ──
+                            # (típico: objeto muy cerca y descentrado, franja
+                            # de piso libre demasiado angosta o en zona ciega
+                            # de calibración). No mandar obs=0 a ciegas.
+                            steer_deg = emergency_avoid_steer(
+                                bev_obstacles, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
+                            )
+                            pp_active = True
+                            state = "emergency_avoid"
+
+                        elif close_unprojected:
+                            # ── Objeto cerca pero fuera del BEV calibrado ────
+                            # (esquina extrema del frame, ver
+                            # CORNER_FOOT_Y_THRESHOLD)
+                            steer_deg = corner_avoid_steer(close_unprojected)
+                            pp_active = True
+                            state = "corner_avoid"
+
+                        # ── Hint direccional lejano: solo si nada más urgente ──
+                        # está activo (ni obstáculo BEV ni esquina cercana).
+                        if C.FAR_HINT_ENABLED and not bev_obstacles and not close_unprojected:
+                            far_hint_deg = self.far_hint.compute(far_objects)
+                            if pp_active:
+                                steer_deg = max(-C.MAX_STEER_DEG,
+                                                 min(C.MAX_STEER_DEG,
+                                                     steer_deg + far_hint_deg))
+                        else:
+                            self.far_hint.reset_all()
+
                         if pp_active:
                             obs_norm = self.controller.normalize(steer_deg)
-                            
+
                     except Exception as e:
                         import traceback
                         print(f"[ERROR] {e}", flush=True)
                         traceback.print_exc()
                 else:
                     self.far_hint.reset_all()
-
-                # Sin línea válida → recto (obs=0).
-                state = "pp_follow" if pp_active else "no_path"
 
                 # ── Construir y enviar mensaje serial ────────────────────────
                 serial_msg = self._build_serial_message(obs_norm, state, len(bev_obstacles))
@@ -347,16 +386,16 @@ class PPRuntime:
                     log_line += f" | RX: {serial_ack}"
                 print(log_line, flush=True)
 
-                
                 # ── Display ──────────────────────────────────────────────────
                 self._annotate(processed_frame, steer_deg, obs_norm,
                             pp_active, len(path_points), positions,
-                            serial_msg, fps, len(bev_obstacles))
+                            serial_msg, fps, len(bev_obstacles), state)
 
                 if bev_frame is not None:
                     bev_debug = draw_bev_debug(
                         bev_frame, path_points, lookahead_pt,
                         bev_obstacles, steer_deg, pp_active,
+                        lookahead_px=lk_used,
                     )
                     bev_h = processed_frame.shape[0]
                     bev_small = cv2.resize(bev_debug, (bev_h, bev_h))

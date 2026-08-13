@@ -2,6 +2,10 @@
 Test visual de BEV + centerline + Pure Pursuit.
 No requiere ESP32 ni serial solo cámara y bev_calib.npz.
 
+Incluye lookahead dinámico + esquive de emergencia + esquive de esquina,
+igual que runtime_nuevo.py, para poder probar esos comportamientos con el
+carro apagado.
+
 USO:
   python -m pure_pursuit.test_vision          # desde src/RASPI/cam/
   python -m pure_pursuit.test_vision --video archivo.mp4
@@ -27,7 +31,12 @@ if _CAM_DIR not in sys.path:
 from vision import Vision
 from .bev        import BEVTransformer
 from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
-from .controller import PurePursuitController
+from .controller import (
+    PurePursuitController,
+    dynamic_lookahead,
+    emergency_avoid_steer,
+    corner_avoid_steer,
+)
 from . import config as C
 
 
@@ -97,13 +106,26 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
         try:
             bev_frame = bev.warp(processed)
 
-            bev_obstacles: list[tuple[float, float, str]] = []
+            new_obstacles     = []
+            far_objects       = []
+            close_unprojected = []
             for color_name in ("Red", "Green"):
                 for obj in positions.get(color_name, []):
                     x, y, w, h = obj
                     result = map_obstacle_to_bev(bev, x, y, w, h)
                     if result is not None:
-                        bev_obstacles.append((result[0], result[1], color_name))
+                        new_obstacles.append((result[0], result[1], color_name))
+                    else:
+                        foot_y = y + h
+                        if foot_y >= C.CORNER_FOOT_Y_THRESHOLD:
+                            close_unprojected.append((x + w / 2.0, w, h, color_name))
+                        else:
+                            far_objects.append((x + w / 2.0, w, h, color_name))
+
+            # Nota: test_vision.py no tiene memoria de obstáculos (eso vive en
+            # runtime_nuevo.py). Aquí bev_obstacles es solo lo detectado en
+            # este frame — suficiente para probar lookahead/emergencia/esquina.
+            bev_obstacles = new_obstacles
 
             path_points = detect_centerline(bev_frame, bev_obstacles)
         except Exception as e:
@@ -112,27 +134,43 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
             traceback.print_exc()
             continue
 
-        steer_deg   = 0.0
+        steer_deg    = 0.0
         lookahead_pt = (float(C.ROBOT_BEV_X), float(C.ROBOT_BEV_Y))
-        pp_active   = False
+        pp_active    = False
+        lk_used      = C.LOOKAHEAD_FAR_PX
+        state        = "no_path"
 
         if len(path_points) >= C.MIN_PATH_PTS:
+            lk_used = dynamic_lookahead(bev_obstacles, C.ROBOT_BEV_X, C.ROBOT_BEV_Y)
             steer_deg, lookahead_pt = controller.compute(
-                path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
+                path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y, lookahead_px=lk_used
             )
             pp_active = True
+            state = "pp_follow"
+
+        elif bev_obstacles and C.EMERGENCY_AVOID_ENABLED:
+            steer_deg = emergency_avoid_steer(bev_obstacles, C.ROBOT_BEV_X, C.ROBOT_BEV_Y)
+            pp_active = True
+            state = "emergency_avoid"
+
+        elif close_unprojected:
+            steer_deg = corner_avoid_steer(close_unprojected)
+            pp_active = True
+            state = "corner_avoid"
 
         # ── Dibujar BEV debug ─────────────────────────────────────────────────
         bev_debug = draw_bev_debug(
             bev_frame, path_points, lookahead_pt,
             bev_obstacles, steer_deg, pp_active,
+            lookahead_px=lk_used,
         )
 
         # ── Overlay en frame de cámara ────────────────────────────────────────
         lines = [
-            f"fps={fps:.1f}  pp={'ON' if pp_active else 'OFF'}  pts={len(path_points)}",
-            f"steer={steer_deg:+.1f} deg",
-            f"obs_R={len(positions.get('Red',[]))}  obs_G={len(positions.get('Green',[]))}",
+            f"fps={fps:.1f}  pp={'ON' if pp_active else 'OFF'}  pts={len(path_points)}  state={state}",
+            f"steer={steer_deg:+.1f} deg  lookahead={lk_used:.0f}px",
+            f"obs_R={len(positions.get('Red',[]))}  obs_G={len(positions.get('Green',[]))}"
+            f"  corner={len(close_unprojected)}  far={len(far_objects)}",
         ]
         y_txt = 22
         for txt in lines:
