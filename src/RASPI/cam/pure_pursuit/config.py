@@ -77,13 +77,25 @@ MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 #
 # dynamic_lookahead() en controller.py interpola entre estos dos valores según
 # qué tan cerca esté el obstáculo más próximo en bev_obstacles.
-LOOKAHEAD_NEAR_PX      = 90.0     # obstáculo pegadísimo → reacciona YA
+LOOKAHEAD_NEAR_PX      = 70.0     # obstáculo pegadísimo → reacciona YA
 LOOKAHEAD_FAR_PX       = 180.0    # sin obstáculos → ve lejos, corrige suave
 OBS_LOOKAHEAD_MIN_DIST = 60.0     # px BEV: a esta distancia o menos, usa LOOKAHEAD_NEAR_PX
 OBS_LOOKAHEAD_MAX_DIST = 220.0    # px BEV: a esta distancia o más, ya usa LOOKAHEAD_FAR_PX
 
 # Se mantiene por compatibilidad con código que todavía use la constante fija.
 LOOKAHEAD_PX = LOOKAHEAD_FAR_PX
+
+# ─── Refuerzo de esquive en rango muy cercano ────────────────────────────────
+# Por debajo de ~20cm la homografía extrapola (no hay calibración real ahí),
+# así que la distancia en BEV del obstáculo puede no reflejar bien qué tan
+# cerca está de verdad -> dynamic_lookahead() puede no achicar lo suficiente
+# el lookahead, y el steer de pp_follow sale más tibio de lo que debería.
+# Como red de seguridad: si el obstáculo más cercano está por debajo de este
+# umbral, se calcula también emergency_avoid_steer() (geometría directa,
+# no depende del lookahead) y se usa el que tenga mayor magnitud, siempre que
+# ambos indiquen la misma dirección.
+CLOSE_RANGE_BOOST_ENABLED = True
+CLOSE_RANGE_BOOST_DIST_PX = 110.0   # px BEV (~22cm) — por debajo de esto se activa el refuerzo
 
 # ─── Esquive de emergencia (path insuficiente pero obstáculo conocido) ───────
 # Si detect_centerline() no logra armar MIN_PATH_PTS puntos (típico cuando el

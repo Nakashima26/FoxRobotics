@@ -170,6 +170,42 @@ def emergency_avoid_steer(
 # Esquive de "esquina" — objeto cerca en cámara cruda, sin proyección BEV
 # ─────────────────────────────────────────────────────────────────────────────
 
+def close_range_boost(
+    steer_deg: float,
+    bev_obstacles: list[tuple[float, float, str]],
+    robot_x: int = C.ROBOT_BEV_X,
+    robot_y: int = C.ROBOT_BEV_Y,
+) -> float:
+    """
+    Refuerzo de seguridad para rango muy cercano (ver CLOSE_RANGE_BOOST_* en
+    config.py). El steer que sale de pp_follow (basado en lookahead) puede
+    salir tibio cuando el obstáculo está en la zona no calibrada de la
+    homografía (<20cm), porque su distancia en BEV no refleja bien la
+    distancia real. Aquí se compara contra emergency_avoid_steer() (geometría
+    directa obstáculo→robot, no depende del lookahead) y se usa el que tenga
+    mayor magnitud — siempre que ambos apunten en la misma dirección; si
+    difieren en signo, se deja el steer original de pp_follow por seguridad
+    (evita un cambio de dirección brusco por una lectura ruidosa).
+    """
+    if not bev_obstacles or not C.CLOSE_RANGE_BOOST_ENABLED:
+        return steer_deg
+
+    nearest = min(
+        math.hypot(ox - robot_x, oy - robot_y) for ox, oy, _ in bev_obstacles
+    )
+    if nearest > C.CLOSE_RANGE_BOOST_DIST_PX:
+        return steer_deg
+
+    alt = emergency_avoid_steer(bev_obstacles, robot_x, robot_y)
+
+    same_direction = (steer_deg == 0.0) or (alt == 0.0) or (
+        (steer_deg > 0) == (alt > 0)
+    )
+    if same_direction and abs(alt) > abs(steer_deg):
+        return alt
+    return steer_deg
+
+
 def corner_avoid_steer(
     close_unprojected: list[tuple[float, float, float, str]],
 ) -> float:
