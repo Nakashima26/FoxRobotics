@@ -29,8 +29,6 @@ class BEVTransformer:
         self.H: np.ndarray | None = None
         self.H_inv: np.ndarray | None = None
         self.last_reproj_err_px: float | None = None
-        self._valid_mask: np.ndarray | None = None
-        self._valid_key: tuple[int, int] | None = None
         path = Path(calib_path) if calib_path else C.CALIB_FILE
         if path.exists():
             self._load(path)
@@ -128,22 +126,6 @@ class BEVTransformer:
 
     def bev_in_bounds(self, bev_x: float, bev_y: float) -> bool:
         return 0.0 <= bev_x < C.BEV_W and 0.0 <= bev_y < C.BEV_H
-
-    def valid_bev_mask(self, cam_h: int, cam_w: int) -> np.ndarray:
-        """
-        Máscara bool (BEV_H × BEV_W): True donde warpPerspective sí tiene
-        un píxel de cámara.  El negro de la cuña NO es pared — es no-observado.
-        Se cachea: H y el tamaño de cámara no cambian en runtime.
-        """
-        if self.H is None:
-            return np.ones((C.BEV_H, C.BEV_W), dtype=bool)
-        key = (int(cam_h), int(cam_w))
-        if self._valid_key != key or self._valid_mask is None:
-            ones = np.full((key[0], key[1]), 255, dtype=np.uint8)
-            warped = cv2.warpPerspective(ones, self.H, (C.BEV_W, C.BEV_H))
-            self._valid_mask = warped > 127
-            self._valid_key = key
-        return self._valid_mask
 
     @property
     def is_calibrated(self) -> bool:

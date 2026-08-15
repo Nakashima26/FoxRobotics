@@ -109,17 +109,6 @@ OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
 OBS_MEM_BEHIND_PAD = 10      # px: tirar el obstáculo cuando queda detrás del robot (bev_y > robot_y + pad)
 OBS_MEM_MAX        = 12      # tope de obstáculos recordados (seguridad)
 
-# ─── Memoria de piso (occupancy rodante) — floor_memory.py ────────────────────
-# Fusiona la máscara HSV de este frame con las orillas vistas hace ~0.5 s, para
-# que la centerline no muera cuando una pared se sale de la cuña BEV.
-# Conservador a propósito: cerca del robot gana el cuadro actual; lo no observado
-# (negro de la homografía) decae en FLOOR_MEM_TAU_S segundos.
-FLOOR_MEM_ENABLED = True
-FLOOR_MEM_TAU_S   = 0.55   # e-folding de celdas no re-vistas (s). 0.4–0.8 es el rango útil
-FLOOR_MEM_THRESH  = 0.40   # confianza mínima para contar como piso en la centerline
-FLOOR_MEM_NEAR_W  = 0.85   # peso del cuadro ACTUAL junto al robot (abajo en BEV)
-FLOOR_MEM_FAR_W   = 0.25   # peso del cuadro ACTUAL lejos (arriba: homografía peor)
-
 # ─── Hint direccional (obstáculo lejano, fuera de rango BEV) ─────────────────
 # Un objeto rojo/verde detectado en la imagen de cámara CRUDA (no en BEV) que
 # todavía no proyecta dentro del rango calibrado.  Se usa SOLO para empezar a
