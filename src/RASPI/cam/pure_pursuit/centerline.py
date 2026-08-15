@@ -1,11 +1,17 @@
 """
 Detección de centerline en imagen BEV y mapeo de obstáculos a coordenadas BEV.
 
-NOTA: la esquiva "fina" de obstáculos ya NO se hace aquí — la hace
-avoidance.py por cinemática inversa (tangente). Esta función solo enmascara
-los obstáculos de forma SIMÉTRICA para que, en modo centerline puro (sin
-esquiva activa, o durante la transición de blend), el camino no cruce
-literalmente sobre un obstáculo recordado.
+Algoritmo:
+  1. Máscara de piso (HSV FLOOR_LOWER / FLOOR_UPPER) en la imagen BEV.
+  2. Elimina zonas de obstáculos (inflado simétrico + sesgo asimétrico WRO).
+  3. Muestrea filas de abajo hacia arriba y calcula el centroide X de cada
+     franja libre → lista de puntos (x, y) = centerline.
+
+Sesgo de color WRO:
+  Rojo  → el robot pasa por la DERECHA del bloque
+           → se bloquea más a la IZQUIERDA del bloque en BEV
+  Verde → el robot pasa por la IZQUIERDA del bloque
+           → se bloquea más a la DERECHA del bloque en BEV
 """
 
 import cv2
@@ -15,10 +21,21 @@ from .bev import BEVTransformer
 from . import config as C
 
 
-def map_obstacle_to_bev(bev, cam_x, cam_y, cam_w, cam_h):
-    """Proyecta el punto de contacto con el suelo del obstáculo a BEV."""
+# ── Mapeo de obstáculos al plano BEV ──────────────────────────────────────────
+
+def map_obstacle_to_bev(
+    bev: BEVTransformer,
+    cam_x: float, cam_y: float,
+    cam_w: float, cam_h: float,
+) -> tuple[float, float] | None:
+    """
+    Proyecta el punto de contacto con el suelo del obstáculo (centro-inferior
+    del bounding box) desde coordenadas de cámara a coordenadas BEV.
+
+    Retorna (bev_x, bev_y) si el punto cae dentro de la imagen BEV, o None.
+    """
     foot_x = cam_x + cam_w * 0.5
-    foot_y = cam_y + cam_h
+    foot_y = cam_y + cam_h        # fondo del bbox ≈ suelo
     result = bev.cam_to_bev(foot_x, foot_y)
     if result is None:
         return None
@@ -28,7 +45,12 @@ def map_obstacle_to_bev(bev, cam_x, cam_y, cam_w, cam_h):
     return None
 
 
-def _widest_free_segment(row_mask, min_width):
+# ── Helpers internos ──────────────────────────────────────────────────────────
+
+def _widest_free_segment(row_mask: np.ndarray, min_width: int) -> int | None:
+    """
+    Retorna el centro-x del segmento libre más ancho en una fila de máscara.
+    """
     free_cols = np.where(row_mask > 0)[0]
     if len(free_cols) < min_width:
         return None
@@ -55,14 +77,25 @@ def _widest_free_segment(row_mask, min_width):
     return (best_l + best_r) // 2
 
 
-def detect_centerline(bev_bgr, bev_obstacles):
+# ── Detección de centerline ───────────────────────────────────────────────────
+
+def detect_centerline(
+    bev_bgr: np.ndarray,
+    bev_obstacles: list[tuple[float, float, str]],
+) -> list[tuple[int, int]]:
     """
     Detecta la línea central del corredor en la imagen BEV.
-    Obstáculos se enmascaran de forma simétrica (sin sesgo) — la esquiva
-    precisa la maneja avoidance.py cuando el obstáculo está en rango de acción.
+
+    Parámetros:
+      bev_bgr      : imagen BEV en BGR (BEV_W × BEV_H)
+      bev_obstacles: lista de (bev_x, bev_y, color_str)  color_str = "Red"|"Green"
+
+    Retorna lista de (x, y) en coordenadas BEV, ordenada de abajo (robot)
+    hacia arriba (adelante).  Lista vacía si no hay suficiente piso visible.
     """
     h, w = bev_bgr.shape[:2]
 
+    # ── 1. Máscara de piso ────────────────────────────────────────────────────
     hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
     floor_mask = cv2.inRange(hsv, C.FLOOR_LOWER, C.FLOOR_UPPER)
 
@@ -71,58 +104,106 @@ def detect_centerline(bev_bgr, bev_obstacles):
     floor_mask = cv2.morphologyEx(floor_mask, cv2.MORPH_OPEN,  k3)
     floor_mask = cv2.morphologyEx(floor_mask, cv2.MORPH_CLOSE, k5)
 
+    # ── 2. Eliminar obstáculos + sesgo de color WRO ───────────────────────────
     free_mask = floor_mask.copy()
     for ox, oy, color in bev_obstacles:
         ix, iy = int(round(ox)), int(round(oy))
+
+        # Zona de seguridad simétrica alrededor del obstáculo
         cv2.circle(free_mask, (ix, iy), C.OBS_INFLATE_R, 0, -1)
 
-    points = []
+        # Sesgo asimétrico según reglas WRO de color
+        if color == "Red":
+            # Robot debe pasar por la DERECHA → bloquear más a la izquierda del bloque
+            cx_bias = ix - C.OBS_BIAS_SHIFT
+            cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
+        elif color == "Green":
+            # Robot debe pasar por la IZQUIERDA → bloquear más a la derecha del bloque
+            cx_bias = ix + C.OBS_BIAS_SHIFT
+            cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
+
+    # ── 3. Muestreo fila a fila ───────────────────────────────────────────────
+    points: list[tuple[int, int]] = []
     for y in range(h - 10, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
-        cx = _widest_free_segment(free_mask[y, :], C.CENTERLINE_MIN_WIDTH)
-        if cx is not None:
-            points.append((cx, y))
+        # Si hay obstáculo activo en esta fila, forzar punto en el lado correcto
+        # sin consultar la máscara de piso.
+        forced_cx: int | None = None
+        for ox, oy, color in bev_obstacles:
+            if abs(oy - y) <= C.OBS_INFLATE_R + C.OBS_BIAS_SHIFT:
+                iox = int(ox)
+                pref_min = max(1, C.CENTERLINE_MIN_WIDTH // 2)
+                if color == "Red":
+                    # Buscar centro del espacio libre a la derecha del obstáculo
+                    cx_rel = _widest_free_segment(free_mask[y, iox:], pref_min)
+                    forced_cx = (iox + cx_rel) if cx_rel is not None else iox + C.OBS_PHYSICAL_R_PX
+                elif color == "Green":
+                    # Buscar centro del espacio libre a la izquierda del obstáculo
+                    cx_abs = _widest_free_segment(free_mask[y, :iox], pref_min)
+                    forced_cx = cx_abs if cx_abs is not None else iox - C.OBS_PHYSICAL_R_PX
+                break
+
+        if forced_cx is not None:
+            points.append((np.clip(forced_cx, 0, w - 1), y))
+        else:
+            cx = _widest_free_segment(free_mask[y, :], C.CENTERLINE_MIN_WIDTH)
+            if cx is not None:
+                points.append((cx, y))
 
     return points
 
 
-def draw_bev_debug(bev_bgr, path_points, lookahead_pt, bev_obstacles,
-                    steer_deg=0.0, pp_active=False, avoid_active=False):
+# ── Visualización BEV ─────────────────────────────────────────────────────────
+
+def draw_bev_debug(
+    bev_bgr: np.ndarray,
+    path_points: list[tuple[int, int]],
+    lookahead_pt: tuple[float, float] | None,
+    bev_obstacles: list[tuple[float, float, str]],
+    steer_deg: float = 0.0,
+    pp_active: bool = False,
+) -> np.ndarray:
+    """
+    Dibuja sobre la imagen BEV:
+      - Obstáculos con su radio de inflado
+      - Centerline (puntos + línea)
+      - Punto look-ahead (círculo amarillo)
+      - Posición del robot con flecha de heading
+      - Círculo del radio look-ahead
+      - Texto de estado
+    """
     out = bev_bgr.copy()
 
+    # Obstáculos
     for ox, oy, color in bev_obstacles:
         col_bgr = (0, 0, 200) if color == "Red" else (0, 200, 0)
-        cv2.circle(out, (int(ox), int(oy)), C.AVOID_RADIUS_PX,     col_bgr, 1)
-        cv2.circle(out, (int(ox), int(oy)), C.OBS_PHYSICAL_R_PX,   col_bgr, 2)
+        cv2.circle(out, (int(ox), int(oy)), C.OBS_INFLATE_R,   col_bgr, 1)   # zona bloqueada
+        cv2.circle(out, (int(ox), int(oy)), C.OBS_PHYSICAL_R_PX, col_bgr, 2)  # tamaño real de lata
         cv2.circle(out, (int(ox), int(oy)), 4, col_bgr, -1)
 
+    # Centerline
     if len(path_points) > 1:
         pts_arr = np.array(path_points, dtype=np.int32).reshape(-1, 1, 2)
         cv2.polylines(out, [pts_arr], False, (0, 220, 220), 2)
     for pt in path_points:
         cv2.circle(out, pt, 3, (0, 220, 220), -1)
 
+    # Punto look-ahead — solo cuando PP está activo (evita mostrar punto obsoleto en modo fallback)
     if lookahead_pt is not None and pp_active:
         lx, ly = int(lookahead_pt[0]), int(lookahead_pt[1])
-        col = (0, 150, 255) if avoid_active else (0, 220, 255)
-        cv2.circle(out, (lx, ly), 8, col, -1)
+        cv2.circle(out, (lx, ly), 8, (0, 220, 255), -1)
         cv2.circle(out, (lx, ly), 8, (0, 0, 0), 2)
 
+    # Robot
     rx, ry = C.ROBOT_BEV_X, C.ROBOT_BEV_Y
     cv2.circle(out, (rx, ry), 9, (255, 80, 0), -1)
     cv2.arrowedLine(out, (rx, ry), (rx, ry - 25), (255, 255, 255), 2, tipLength=0.35)
+
+    # Radio look-ahead
     cv2.circle(out, (rx, ry), int(C.LOOKAHEAD_PX), (60, 60, 60), 1)
-    cv2.circle(out, (rx, ry), int(C.AVOID_ACTION_RANGE_PX), (90, 40, 40), 1)
 
-    if avoid_active:
-        mode_txt = f"AVOID(tangente)  steer={steer_deg:+.1f}deg"
-        col_txt = (0, 150, 255)
-    elif pp_active:
-        mode_txt = f"PP  steer={steer_deg:+.1f}deg"
-        col_txt = (0, 220, 0)
-    else:
-        mode_txt = "FALLBACK PID"
-        col_txt = (0, 100, 255)
-
+    # Estado
+    mode_txt = f"PP  steer={steer_deg:+.1f}deg" if pp_active else "FALLBACK PID"
+    col_txt  = (0, 220, 0) if pp_active else (0, 100, 255)
     cv2.putText(out, mode_txt, (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.50, col_txt, 2)
     cv2.putText(out, f"path_pts={len(path_points)}", (6, 38),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)

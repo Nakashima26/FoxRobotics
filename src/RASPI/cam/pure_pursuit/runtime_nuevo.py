@@ -46,7 +46,6 @@ from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
-from .avoidance import AvoidanceController      
 from . import config as C
 
 
@@ -104,7 +103,6 @@ class PPRuntime:
         self.memory     = ObstacleMemory()
         self.controller = PurePursuitController()
         self.memory     = ObstacleMemory()
-        self.avoidance  = AvoidanceController()       
         self.far_hint   = FarHintManager()
         
         # Estado de la memoria rodante
@@ -272,14 +270,15 @@ class PPRuntime:
                 bev_frame     = None
                 bev_obstacles = []
                 pp_active     = False
-                avoid_active  = False 
 
                 if self.bev.is_calibrated:
                     try:
                         bev_frame = self.bev.warp(processed_frame)
 
+                        # Proyectar obstáculos detectados al plano BEV, y
+                        # separar los que NO proyectaron (candidatos a hint lejano)
                         new_obstacles = []
-                        far_objects   = []
+                        far_objects   = []   # (center_x, w, h, color) — fuera de BEV
                         for color_name in ("Red", "Green"):
                             for obj in positions.get(color_name, []):
                                 x, y, w, h = obj
@@ -287,60 +286,42 @@ class PPRuntime:
                                 if result is not None:
                                     new_obstacles.append((result[0], result[1], color_name))
                                 else:
+                                    # No proyectó (fuera de bev_in_bounds o
+                                    # cam_to_bev falló) → tratar como lejano
                                     far_objects.append((x + w / 2.0, w, h, color_name))
 
+                        # ── Memoria rodante: fusiona lo nuevo con lo recordado ──
+                        # (Solo con obstáculos BEV reales — el far_hint NO entra aquí)
                         bev_obstacles = self.memory.update(
                             new_obstacles, dt_s, self._last_heading
                         )
 
-                        # ── Esquiva por tangente (cinemática inversa) ───────────────────
-                        avoid_steer, avoid_lookahead, avoid_active, avoid_blending = \
-                            self.avoidance.compute(
-                                bev_obstacles, C.ROBOT_BEV_X, C.ROBOT_BEV_Y, self.controller
-                            )
-
-                        # ── Centerline normal (obstáculos enmascarados sin sesgo) ───────
+                        # Detectar centerline (con obstáculos recordados+nuevos)
                         path_points = detect_centerline(bev_frame, bev_obstacles)
-                        centerline_active = len(path_points) >= C.MIN_PATH_PTS
-                        if centerline_active:
-                            cl_steer, cl_lookahead = self.controller.compute(
+
+                        if len(path_points) >= C.MIN_PATH_PTS:
+                            steer_deg, lookahead_pt = self.controller.compute(
                                 path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
                             )
-                        else:
-                            cl_steer, cl_lookahead = 0.0, (float(C.ROBOT_BEV_X), float(C.ROBOT_BEV_Y))
-
-                        # ── Fusión: esquiva tiene prioridad; si no, blend suave; si no, centerline ──
-                        if avoid_active:
-                            steer_deg, lookahead_pt = avoid_steer, avoid_lookahead
                             pp_active = True
-                        elif avoid_blending and centerline_active:
-                            w = self.avoidance.blend_remaining / max(1, C.AVOID_BLEND_FRAMES)
-                            steer_deg = w * avoid_steer + (1.0 - w) * cl_steer
-                            lookahead_pt = cl_lookahead
-                            pp_active = True
-                        elif centerline_active:
-                            steer_deg, lookahead_pt = cl_steer, cl_lookahead
-                            pp_active = True
-                        else:
-                            steer_deg, lookahead_pt = 0.0, (float(C.ROBOT_BEV_X), float(C.ROBOT_BEV_Y))
-                            pp_active = False
 
-                        steer_deg = max(-C.MAX_STEER_DEG, min(C.MAX_STEER_DEG, steer_deg))
-
-                        # ── Hint direccional: solo si NO hay esquiva por tangente activa ──
+                        # ── Hint direccional: solo suma al steer, nunca a prio/mem ──
                         far_hint_deg = 0.0
                         if C.FAR_HINT_ENABLED:
-                            if not avoid_active:
+                            bev_obstacle_active = len(bev_obstacles) > 0
+                            if not bev_obstacle_active:
                                 far_hint_deg = self.far_hint.compute(far_objects)
                                 if pp_active:
                                     steer_deg = max(-C.MAX_STEER_DEG,
-                                                    min(C.MAX_STEER_DEG, steer_deg + far_hint_deg))
+                                                     min(C.MAX_STEER_DEG,
+                                                         steer_deg + far_hint_deg))
                             else:
+                                # Hay un obstáculo BEV real activo → el hint no
+                                # debe competir con la esquiva geométrica precisa.
                                 self.far_hint.reset_all()
-
                         if pp_active:
                             obs_norm = self.controller.normalize(steer_deg)
-
+                            
                     except Exception as e:
                         import traceback
                         print(f"[ERROR] {e}", flush=True)
@@ -376,7 +357,6 @@ class PPRuntime:
                     bev_debug = draw_bev_debug(
                         bev_frame, path_points, lookahead_pt,
                         bev_obstacles, steer_deg, pp_active,
-                        avoid_active=avoid_active,     # ← nuevo
                     )
                     bev_h = processed_frame.shape[0]
                     bev_small = cv2.resize(bev_debug, (bev_h, bev_h))
