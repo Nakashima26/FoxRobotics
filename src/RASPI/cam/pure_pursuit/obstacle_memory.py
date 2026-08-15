@@ -143,6 +143,7 @@ class ObstacleMemory:
 
         if heading_deg is not None and self._prev_heading is not None:
             dheading = heading_deg - self._prev_heading
+            dheading = (dheading + 180.0) % 360.0 - 180.0
         else:
             dheading = 0.0
         if heading_deg is not None:

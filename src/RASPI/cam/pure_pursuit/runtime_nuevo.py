@@ -1,17 +1,13 @@
 """
-Runtime Pure Pursuit + MEMORIA DE OBSTÁCULOS — WRO Future Engineers.
+Runtime Pure Pursuit + MEMORIA DE OBSTÁCULOS + PISO — WRO Future Engineers.
 
-Igual que runtime.py, pero con un mapa rodante disperso (obstacle_memory.py):
-el robot recuerda las latas vistas y las arrastra hacia sí cuadro a cuadro usando
-avance asumido (velocidad) + giro del IMU (anguloGyro que el ESP32 ahora regresa
-en el ACK:V2).  Así la inflación de la lata no desaparece cuando ésta sale del
-campo de visión, y el carro deja de cortarse sobre ella.
+Igual que runtime.py, pero con mapas rodantes:
+  • obstacle_memory.py — latas; la inflación no desaparece al salir del FOV
+  • floor_memory.py    — orillas/piso; la centerline no muere al salirse
+                         una pared de la cuña BEV
 
-Diferencias vs runtime.py:
-  • self.memory = ObstacleMemory()
-  • parsea ang=<heading> del ACK:V2 del ESP32
-  • antes de detect_centerline, fusiona detecciones nuevas con la memoria
-  • el heading usado va con 1 frame de retraso (el ACK llega tras enviar) — irrelevante
+Ambos se arrastran con avance asumido + giro del IMU (anguloGyro en ACK:V2).
+El heading usado va con 1 frame de retraso (el ACK llega tras enviar).
 
 Para correrlo:
   python -m pure_pursuit.runtime_nuevo
@@ -42,9 +38,15 @@ from wro_runtime import (
 )
 
 from .bev import BEVTransformer
-from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
+from .centerline import (
+    detect_centerline,
+    map_obstacle_to_bev,
+    draw_bev_debug,
+    extract_floor_mask,
+)
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
+from .floor_memory import FloorMemory
 from .far_hint import FarHintManager
 from . import config as C
 
@@ -101,8 +103,7 @@ class PPRuntime:
         self.bev        = BEVTransformer(cfg.calib_path)
         self.controller = PurePursuitController()
         self.memory     = ObstacleMemory()
-        self.controller = PurePursuitController()
-        self.memory     = ObstacleMemory()
+        self.floor_mem  = FloorMemory() if C.FLOOR_MEM_ENABLED else None
         self.far_hint   = FarHintManager()
         
         # Estado de la memoria rodante
@@ -126,7 +127,9 @@ class PPRuntime:
             pass
 
         if self.bev.is_calibrated:
-            print("[PP] BEV calibrado — Pure Pursuit + memoria activo.", flush=True)
+            extra = " + piso" if self.floor_mem is not None else ""
+            print(f"[PP] BEV calibrado — Pure Pursuit + memoria de latas{extra} activo.",
+                  flush=True)
         else:
             print("[PP] Sin calibración BEV — el robot irá recto.", flush=True)
             print(f"[PP] Corre: python -m pure_pursuit.calibrate", flush=True)
@@ -193,7 +196,7 @@ class PPRuntime:
         lines = [
             f"fps={fps:.1f}  pp={'ON' if pp_active else 'OFF'}  pts={n_path_pts}",
             f"steer={steer_deg:+.1f} deg  obs={obs_norm:+.3f}",
-            f"obs_R={len(positions.get('Red', []))}  obs_G={len(positions.get('Green', []))}  mem={n_mem}",
+            f"obs_R={len(positions.get('Red', []))}  obs_G={len(positions.get('Green', []))}  mem={n_mem}  fmap={'ON' if C.FLOOR_MEM_ENABLED else 'off'}",
             f"tx: {serial_msg[:55]}",
         ]
         y = 22
@@ -269,6 +272,7 @@ class PPRuntime:
                 path_points   = []
                 bev_frame     = None
                 bev_obstacles = []
+                fused_floor   = None
                 pp_active     = False
 
                 if self.bev.is_calibrated:
@@ -296,8 +300,18 @@ class PPRuntime:
                             new_obstacles, dt_s, self._last_heading
                         )
 
-                        # Detectar centerline (con obstáculos recordados+nuevos)
-                        path_points = detect_centerline(bev_frame, bev_obstacles)
+                        floor_now = extract_floor_mask(bev_frame)
+                        fused_floor = floor_now
+                        if self.floor_mem is not None:
+                            cam_h, cam_w = processed_frame.shape[:2]
+                            valid = self.bev.valid_bev_mask(cam_h, cam_w)
+                            fused_floor = self.floor_mem.update(
+                                floor_now, valid, dt_s, self._last_heading
+                            )
+
+                        path_points = detect_centerline(
+                            bev_frame, bev_obstacles, floor_mask=fused_floor
+                        )
 
                         if len(path_points) >= C.MIN_PATH_PTS:
                             steer_deg, lookahead_pt = self.controller.compute(
@@ -357,6 +371,7 @@ class PPRuntime:
                     bev_debug = draw_bev_debug(
                         bev_frame, path_points, lookahead_pt,
                         bev_obstacles, steer_deg, pp_active,
+                        floor_overlay=fused_floor if self.floor_mem is not None else None,
                     )
                     bev_h = processed_frame.shape[0]
                     bev_small = cv2.resize(bev_debug, (bev_h, bev_h))

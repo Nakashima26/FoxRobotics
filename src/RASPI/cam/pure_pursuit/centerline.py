@@ -77,11 +77,25 @@ def _widest_free_segment(row_mask: np.ndarray, min_width: int) -> int | None:
     return (best_l + best_r) // 2
 
 
+# ── Máscara de piso (HSV) ─────────────────────────────────────────────────────
+
+def extract_floor_mask(bev_bgr: np.ndarray) -> np.ndarray:
+    """Máscara uint8 0/255 del piso beige en la imagen BEV de este frame."""
+    hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
+    floor_mask = cv2.inRange(hsv, C.FLOOR_LOWER, C.FLOOR_UPPER)
+    k3 = np.ones((3, 3), np.uint8)
+    k5 = np.ones((5, 5), np.uint8)
+    floor_mask = cv2.morphologyEx(floor_mask, cv2.MORPH_OPEN,  k3)
+    floor_mask = cv2.morphologyEx(floor_mask, cv2.MORPH_CLOSE, k5)
+    return floor_mask
+
+
 # ── Detección de centerline ───────────────────────────────────────────────────
 
 def detect_centerline(
     bev_bgr: np.ndarray,
     bev_obstacles: list[tuple[float, float, str]],
+    floor_mask: np.ndarray | None = None,
 ) -> list[tuple[int, int]]:
     """
     Detecta la línea central del corredor en la imagen BEV.
@@ -89,6 +103,8 @@ def detect_centerline(
     Parámetros:
       bev_bgr      : imagen BEV en BGR (BEV_W × BEV_H)
       bev_obstacles: lista de (bev_x, bev_y, color_str)  color_str = "Red"|"Green"
+      floor_mask   : máscara 0/255 opcional (p.ej. fusionada por FloorMemory).
+                     Si es None, se extrae del HSV de bev_bgr.
 
     Retorna lista de (x, y) en coordenadas BEV, ordenada de abajo (robot)
     hacia arriba (adelante).  Lista vacía si no hay suficiente piso visible.
@@ -96,13 +112,10 @@ def detect_centerline(
     h, w = bev_bgr.shape[:2]
 
     # ── 1. Máscara de piso ────────────────────────────────────────────────────
-    hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
-    floor_mask = cv2.inRange(hsv, C.FLOOR_LOWER, C.FLOOR_UPPER)
-
-    k3 = np.ones((3, 3), np.uint8)
-    k5 = np.ones((5, 5), np.uint8)
-    floor_mask = cv2.morphologyEx(floor_mask, cv2.MORPH_OPEN,  k3)
-    floor_mask = cv2.morphologyEx(floor_mask, cv2.MORPH_CLOSE, k5)
+    if floor_mask is None:
+        floor_mask = extract_floor_mask(bev_bgr)
+    else:
+        floor_mask = floor_mask.copy()
 
     # ── 2. Eliminar obstáculos + sesgo de color WRO ───────────────────────────
     free_mask = floor_mask.copy()
@@ -161,6 +174,7 @@ def draw_bev_debug(
     bev_obstacles: list[tuple[float, float, str]],
     steer_deg: float = 0.0,
     pp_active: bool = False,
+    floor_overlay: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Dibuja sobre la imagen BEV:
@@ -170,8 +184,16 @@ def draw_bev_debug(
       - Posición del robot con flecha de heading
       - Círculo del radio look-ahead
       - Texto de estado
+      - floor_overlay: piso recordado fuera de la cuña (cian tenue)
     """
     out = bev_bgr.copy()
+
+    if floor_overlay is not None:
+        remembered = (floor_overlay > 0) & (out.mean(axis=2) < 18)
+        if np.any(remembered):
+            tint = np.array([40, 180, 180], dtype=np.float32)  # BGR cian
+            blended = out[remembered].astype(np.float32) * 0.35 + tint * 0.65
+            out[remembered] = np.clip(blended, 0, 255).astype(np.uint8)
 
     # Obstáculos
     for ox, oy, color in bev_obstacles:
@@ -205,7 +227,8 @@ def draw_bev_debug(
     mode_txt = f"PP  steer={steer_deg:+.1f}deg" if pp_active else "FALLBACK PID"
     col_txt  = (0, 220, 0) if pp_active else (0, 100, 255)
     cv2.putText(out, mode_txt, (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.50, col_txt, 2)
-    cv2.putText(out, f"path_pts={len(path_points)}", (6, 38),
+    mem_txt = "  fmap=ON" if floor_overlay is not None else ""
+    cv2.putText(out, f"path_pts={len(path_points)}{mem_txt}", (6, 38),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
 
     return out
