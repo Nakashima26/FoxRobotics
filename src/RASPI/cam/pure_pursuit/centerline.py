@@ -4,8 +4,10 @@ Detección de centerline en imagen BEV y mapeo de obstáculos a coordenadas BEV.
 Algoritmo:
   1. Máscara de piso (HSV FLOOR_LOWER / FLOOR_UPPER) en la imagen BEV.
   2. Elimina zonas de obstáculos (inflado simétrico + sesgo asimétrico WRO).
-  3. Muestrea filas de abajo hacia arriba y calcula el centroide X de cada
-     franja libre → lista de puntos (x, y) = centerline.
+  3. Muestrea filas de abajo hacia arriba. En cada fila mezcla el centro del
+     hueco libre con el lado de paso WRO, con peso que rampa al acercarse a
+     la lata (no un switch binario en Y).
+  4. Media móvil 1-D en X + tope de Δx por paso (curvatura de servo).
 
 Sesgo de color WRO:
   Rojo  → el robot pasa por la DERECHA del bloque
@@ -13,6 +15,8 @@ Sesgo de color WRO:
   Verde → el robot pasa por la IZQUIERDA del bloque
            → se bloquea más a la DERECHA del bloque en BEV
 """
+
+import math
 
 import cv2
 import numpy as np
@@ -77,6 +81,77 @@ def _widest_free_segment(row_mask: np.ndarray, min_width: int) -> int | None:
     return (best_l + best_r) // 2
 
 
+def _ramp_weight(row_y: int, obs_y: float) -> float:
+    """
+    0 = ignorar la lata (usar centro del pasillo), 1 = lado de paso completo.
+    La rampa entra al acercarse a la lata y se mantiene en 1 en el inflado;
+    al rebasarla decae en un radio de inflación para volver al centro.
+    """
+    full_r = float(C.OBS_INFLATE_R)
+    ramp = max(full_r + 1.0, float(C.CENTERLINE_RAMP_PX))
+    d = float(row_y) - float(obs_y)  # >0: la fila aún no llega a la lata
+
+    if d >= ramp:
+        return 0.0
+    if d > full_r:
+        return 1.0 - (d - full_r) / (ramp - full_r)
+    if d >= -full_r:
+        return 1.0
+    return max(0.0, 1.0 + (d + full_r) / full_r)
+
+
+def _pass_side_cx(row_mask: np.ndarray, ox: float, color: str) -> int | None:
+    """Centro del hueco libre del lado WRO correcto en esta fila."""
+    iox = int(ox)
+    iox = max(0, min(iox, row_mask.shape[0] - 1))
+    pref_min = max(1, C.CENTERLINE_MIN_WIDTH // 2)
+    if color == "Red":
+        cx_rel = _widest_free_segment(row_mask[iox:], pref_min)
+        return (iox + cx_rel) if cx_rel is not None else iox + C.OBS_PHYSICAL_R_PX
+    if color == "Green":
+        cx_abs = _widest_free_segment(row_mask[:iox], pref_min)
+        return cx_abs if cx_abs is not None else iox - C.OBS_PHYSICAL_R_PX
+    return None
+
+
+def _smooth_x(points: list[tuple[float, int]]) -> list[tuple[float, int]]:
+    """Media móvil corta en X con padding de borde (no tira los extremos a 0)."""
+    n = len(points)
+    win = int(C.CENTERLINE_SMOOTH_WIN)
+    if n < 3 or win < 3:
+        return points
+    if win % 2 == 0:
+        win += 1
+    xs = np.array([p[0] for p in points], dtype=np.float64)
+    kernel = np.ones(win, dtype=np.float64) / win
+    pad = win // 2
+    padded = np.pad(xs, pad, mode="edge")
+    xs_s = np.convolve(padded, kernel, mode="valid")
+    return [(float(xs_s[i]), points[i][1]) for i in range(n)]
+
+
+def _limit_lateral_step(points: list[tuple[float, int]]) -> list[tuple[float, int]]:
+    """
+    Acota |Δx| entre filas consecutivas a lo que el servo puede (tan(δ_max)·Δy).
+    Recorre desde el robot (primer punto) hacia adelante.
+    """
+    if len(points) < 2:
+        return points
+    max_dx = math.tan(math.radians(C.MAX_STEER_DEG)) * float(C.CENTERLINE_ROW_STEP)
+    out: list[tuple[float, int]] = [points[0]]
+    prev_x = float(points[0][0])
+    for i in range(1, len(points)):
+        x, y = points[i]
+        dx = x - prev_x
+        if dx > max_dx:
+            x = prev_x + max_dx
+        elif dx < -max_dx:
+            x = prev_x - max_dx
+        out.append((x, y))
+        prev_x = x
+    return out
+
+
 # ── Detección de centerline ───────────────────────────────────────────────────
 
 def detect_centerline(
@@ -85,6 +160,11 @@ def detect_centerline(
 ) -> list[tuple[int, int]]:
     """
     Detecta la línea central del corredor en la imagen BEV.
+
+    Con obstáculos de color, el X de cada fila es una mezcla entre el centro
+    del hueco libre y el lado de paso WRO. El peso rampa con la distancia
+    longitudinal a la lata (CENTERLINE_RAMP_PX), después se filtra X y se
+    acota el Δx por paso a tan(MAX_STEER)·ROW_STEP.
 
     Parámetros:
       bev_bgr      : imagen BEV en BGR (BEV_W × BEV_H)
@@ -122,34 +202,41 @@ def detect_centerline(
             cx_bias = ix + C.OBS_BIAS_SHIFT
             cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
 
-    # ── 3. Muestreo fila a fila ───────────────────────────────────────────────
-    points: list[tuple[int, int]] = []
+    # ── 3. Muestreo fila a fila (rampa al lado de paso, no switch binario) ────
+    points: list[tuple[float, int]] = []
     for y in range(h - 10, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
-        # Si hay obstáculo activo en esta fila, forzar punto en el lado correcto
-        # sin consultar la máscara de piso.
-        forced_cx: int | None = None
+        row = free_mask[y, :]
+        free_cx = _widest_free_segment(row, C.CENTERLINE_MIN_WIDTH)
+
+        best_w = 0.0
+        pass_cx: int | None = None
         for ox, oy, color in bev_obstacles:
-            if abs(oy - y) <= C.OBS_INFLATE_R + C.OBS_BIAS_SHIFT:
-                iox = int(ox)
-                pref_min = max(1, C.CENTERLINE_MIN_WIDTH // 2)
-                if color == "Red":
-                    # Buscar centro del espacio libre a la derecha del obstáculo
-                    cx_rel = _widest_free_segment(free_mask[y, iox:], pref_min)
-                    forced_cx = (iox + cx_rel) if cx_rel is not None else iox + C.OBS_PHYSICAL_R_PX
-                elif color == "Green":
-                    # Buscar centro del espacio libre a la izquierda del obstáculo
-                    cx_abs = _widest_free_segment(free_mask[y, :iox], pref_min)
-                    forced_cx = cx_abs if cx_abs is not None else iox - C.OBS_PHYSICAL_R_PX
-                break
+            if color not in ("Red", "Green"):
+                continue
+            wgt = _ramp_weight(y, oy)
+            if wgt > best_w:
+                cx_side = _pass_side_cx(row, ox, color)
+                if cx_side is not None:
+                    best_w = wgt
+                    pass_cx = cx_side
 
-        if forced_cx is not None:
-            points.append((np.clip(forced_cx, 0, w - 1), y))
+        if free_cx is None and pass_cx is None:
+            continue
+        if free_cx is None:
+            assert pass_cx is not None
+            cx = float(pass_cx)
+        elif pass_cx is None or best_w <= 0.0:
+            cx = float(free_cx)
         else:
-            cx = _widest_free_segment(free_mask[y, :], C.CENTERLINE_MIN_WIDTH)
-            if cx is not None:
-                points.append((cx, y))
+            cx = (1.0 - best_w) * float(free_cx) + best_w * float(pass_cx)
 
-    return points
+        points.append((float(np.clip(cx, 0, w - 1)), y))
+
+    if points:
+        points = _smooth_x(points)
+        points = _limit_lateral_step(points)
+
+    return [(int(round(np.clip(x, 0, w - 1))), int(y)) for x, y in points]
 
 
 # ── Visualización BEV ─────────────────────────────────────────────────────────

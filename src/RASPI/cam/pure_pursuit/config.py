@@ -79,6 +79,10 @@ FLOOR_UPPER = np.array([180, 60, 240])
 CENTERLINE_ROW_STEP  = 15    # muestrear cada N filas
 CENTERLINE_MIN_WIDTH = 20    # píxeles mínimos de espacio libre para aceptar fila
 CENTERLINE_TOP_Y     = BEV_H // 3   # no subir más allá de 1/3 de la imagen
+CENTERLINE_RAMP_PX   = 200   # horizonte de anticipo: empieza a abrir el path
+                             # hacia el lado de paso a esta distancia Y de la lata
+                             # (200 px ≈ 400 mm; debe ser > LOOKAHEAD_PX)
+CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-muestreo
 
 # ─── Manejo de obstáculos en BEV ─────────────────────────────────────────────
 # Tamaño físico real de los obstáculos (latas de refresco WRO ≈ 65 mm diámetro)
