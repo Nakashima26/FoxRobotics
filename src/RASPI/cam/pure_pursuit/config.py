@@ -138,3 +138,9 @@ SERIAL_PORT    = "/dev/ttyS0"
 BAUDRATE       = 115200
 PROCESS_EVERY  = 3       # procesar 1 de cada N frames capturados
 WARMUP_FRAMES  = 40      # frames descartados para estabilizar exposición
+
+AVOID_CLEARANCE_MM    = 200.0    # margen deseado al pasar el obstáculo (20 cm)
+AVOID_CLEARANCE_PX    = round(AVOID_CLEARANCE_MM / MM_PER_PX)
+AVOID_RADIUS_PX        = OBS_PHYSICAL_R_PX + AVOID_CLEARANCE_PX   # radio total de exclusión
+AVOID_ACTION_RANGE_PX  = LOOKAHEAD_PX * 1.8   # rango donde se activa la esquiva por tangente
+AVOID_BLEND_FRAMES     = 6       # frames de transición suave esquiva -> centerline
