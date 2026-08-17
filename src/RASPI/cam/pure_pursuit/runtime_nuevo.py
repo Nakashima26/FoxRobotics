@@ -46,6 +46,8 @@ from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
+from .corner_lines import detect_lines
+from .segment_tracker import SegmentTracker
 from . import config as C
 
 
@@ -86,6 +88,14 @@ def _parse_heading(ack: str) -> float | None:
     except (ValueError, IndexError):
         return None
 
+def _parse_state(ack: str) -> str | None:
+    if not ack:
+        return None
+    idx = ack.find(",st=")
+    if idx < 0:
+        return None
+    return ack[idx + 4:idx + 5] or None
+
 
 class PPRuntime:
     """
@@ -104,6 +114,9 @@ class PPRuntime:
         self.controller = PurePursuitController()
         self.memory     = ObstacleMemory()
         self.far_hint   = FarHintManager()
+
+        self.segment_tracker = SegmentTracker()
+        self._last_esp_state: str | None = None
         
         # Estado de la memoria rodante
         self._last_heading: float | None = None
@@ -133,10 +146,10 @@ class PPRuntime:
 
     # ── Serial ────────────────────────────────────────────────────────────────
 
-    def _build_serial_message(self, obs_norm: float, state: str, n_mem_obs: int) -> str:
-        has_obstacle = n_mem_obs > 0   # basado en memoria real, no en steer
+    def _build_serial_message(self, obs_norm, state, n_mem_obs, trig):
+        has_obstacle = n_mem_obs > 0
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
-                f"state={state},prio={int(has_obstacle)},mem={n_mem_obs},pp=1")
+                f"state={state},prio={int(has_obstacle)},mem={n_mem_obs},pp=1,trig={int(trig)}")
 
     # ── Captura ───────────────────────────────────────────────────────────────
 
@@ -295,6 +308,16 @@ class PPRuntime:
                         bev_obstacles = self.memory.update(
                             new_obstacles, dt_s, self._last_heading
                         )
+                        
+                        if bev_frame is not None:
+                            line_info = detect_lines(bev_frame)
+                            orange_info, blue_info = line_info["Orange"], line_info["Blue"]
+                            current_obs, queued_obs = self.segment_tracker.split(
+                                bev_obstacles, orange_info, blue_info
+                            )
+                        else:
+                            orange_info = blue_info = {"seen": False, "near_y": None}
+                            current_obs, queued_obs = bev_obstacles, []                        
 
                         # Detectar centerline (con obstáculos recordados+nuevos)
                         path_points = detect_centerline(bev_frame, bev_obstacles)
@@ -333,7 +356,16 @@ class PPRuntime:
                 state = "pp_follow" if pp_active else "no_path"
 
                 # ── Construir y enviar mensaje serial ────────────────────────
-                serial_msg = self._build_serial_message(obs_norm, state, len(bev_obstacles))
+                n_current = len(current_obs)
+                self.segment_tracker.update_arming(
+                    current_obstacle_active=(n_current > 0),
+                    esp_state=self._last_esp_state,
+                )
+                trig = self.segment_tracker.check_trigger(orange_info, blue_info)
+                if trig:
+                    self.segment_tracker.reset()   # listo para la siguiente esquina
+
+                serial_msg = self._build_serial_message(obs_norm, state, n_current, trig)
                 self.serial_link.send_line(serial_msg)
                 serial_ack = self.serial_link.try_readline()
 

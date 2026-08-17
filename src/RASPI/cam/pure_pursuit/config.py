@@ -124,6 +124,18 @@ FAR_HINT_KP          = 0.015   # ganancia proporcional: grados por px de offset
 FAR_HINT_KD          = 0.004   # ganancia derivativa: amortigua saltos por ruido de detección
 CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
 
+# ─── Líneas de esquina (trigger de giro) ─────────────────────────────────
+# Marcadores FÍSICOS FIJOS del tapete, presentes en cada esquina, separados
+# ~30° entre sí. Sirven de gatillo de giro independiente del ultrasónico.
+LINE_ORANGE_HSV = [(np.array([5, 120, 100]),  np.array([18, 255, 255]))]   # AJUSTAR con tapete real
+LINE_BLUE_HSV   = [(np.array([100, 120, 60]), np.array([125, 255, 255]))]  # AJUSTAR con tapete real
+
+LINE_MIN_PIXELS   = 40   # píxeles mínimos en BEV para considerar "veo la línea"
+LINE_PROXIMITY_PX = 60   # si el punto más cercano de la línea está a esta
+                          # distancia (o menos) del robot en Y-BEV, cuenta como "cerca"
+LINE_TRIGGER_OFFSET_RED_MM   = 0.0   # ajuste fino: + dispara antes, - dispara después
+LINE_TRIGGER_OFFSET_GREEN_MM = 0.0
+
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=35  →  obs=steer_deg/35
 # Cuando pp=0:  ESP32 usa visionSteerGain=80  (comportamiento V1 actual)
