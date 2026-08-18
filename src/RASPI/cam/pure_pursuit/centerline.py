@@ -203,47 +203,40 @@ def detect_centerline(
             cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
 
     # ── 3. Muestreo fila a fila (rampa al lado de paso, no switch binario) ────
-        # ── 3. Muestreo fila a fila ───────────────────────────────────────────────
-    points: list[tuple[int, int]] = []
-    influence_r = C.OBS_INFLATE_R + C.OBS_BIAS_SHIFT   # radio de influencia total (~63 px)
-
+    points: list[tuple[float, int]] = []
     for y in range(h - 10, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
-        forced_cx: int | None = None
+        row = free_mask[y, :]
+        free_cx = _widest_free_segment(row, C.CENTERLINE_MIN_WIDTH)
 
+        best_w = 0.0
+        pass_cx: int | None = None
         for ox, oy, color in bev_obstacles:
-            d = abs(oy - y)
-            if d <= influence_r:
-                iox = int(ox)
-                pref_min = max(1, C.CENTERLINE_MIN_WIDTH // 2)
+            if color not in ("Red", "Green"):
+                continue
+            wgt = _ramp_weight(y, oy)
+            if wgt > best_w:
+                cx_side = _pass_side_cx(row, ox, color)
+                if cx_side is not None:
+                    best_w = wgt
+                    pass_cx = cx_side
 
-                # Punto de carril "normal" (sin esquiva) en esta fila, como referencia
-                # para poder interpolar en vez de saltar directo al extremo.
-                normal_cx = _widest_free_segment(free_mask[y, :], C.CENTERLINE_MIN_WIDTH)
-                if normal_cx is None:
-                    normal_cx = iox  # sin referencia de carril libre, usar el propio obstáculo
-
-                if color == "Red":
-                    cx_rel = _widest_free_segment(free_mask[y, iox:], pref_min)
-                    full_evade_cx = (iox + cx_rel) if cx_rel is not None else iox + C.OBS_INFLATE_R
-                elif color == "Green":
-                    cx_abs = _widest_free_segment(free_mask[y, :iox], pref_min)
-                    full_evade_cx = cx_abs if cx_abs is not None else iox - C.OBS_INFLATE_R
-                else:
-                    continue
-
-                # Rampa: weight=1.0 pegado al obstáculo (d=0), weight=0.0 en el borde de influencia
-                weight = 1.0 - (d / influence_r)
-                forced_cx = int(round(normal_cx + weight * (full_evade_cx - normal_cx)))
-                break
-
-        if forced_cx is not None:
-            points.append((np.clip(forced_cx, 0, w - 1), y))
+        if free_cx is None and pass_cx is None:
+            continue
+        if free_cx is None:
+            assert pass_cx is not None
+            cx = float(pass_cx)
+        elif pass_cx is None or best_w <= 0.0:
+            cx = float(free_cx)
         else:
-            cx = _widest_free_segment(free_mask[y, :], C.CENTERLINE_MIN_WIDTH)
-            if cx is not None:
-                points.append((cx, y))
+            cx = (1.0 - best_w) * float(free_cx) + best_w * float(pass_cx)
 
-    return points
+        points.append((float(np.clip(cx, 0, w - 1)), y))
+
+    if points:
+        points = _smooth_x(points)
+        points = _limit_lateral_step(points)
+
+    return [(int(round(np.clip(x, 0, w - 1))), int(y)) for x, y in points]
 
 
 # ── Visualización BEV ─────────────────────────────────────────────────────────
