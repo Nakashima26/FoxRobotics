@@ -273,24 +273,12 @@ void parsePiMessage(String line) {
       piPurePursuit = false;   // mensaje V1 sin campo pp → modo obstáculo
     }
 
-    // trig — dispara GIRANDO forzado por línea de esquina detectada en Pi
-    idx = line.indexOf(",trig=");
-    if (idx >= 0) {
-      String s = line.substring(idx + 6);
-      int end = s.indexOf(',');
-      if (end >= 0) s = s.substring(0, end);
-      if (s.toInt() != 0) trigTurnFromPi = true;
-    }
-
     piReady     = true;
     lastPiMsgMs = millis();
     // Regresamos el heading integrado del gyro para que la Pi pueda mantener
     // su mapa rodante de obstáculos alineado al doblar (obstacle_memory.py).
-    char stChar = (estado == GIRANDO) ? 'G' : (estado == RECUPERANDO) ? 'R' : 'S';
     Serial2.print("ACK:V2,ang=");
     Serial2.println(anguloGyro, 2);
-    Serial2.print(",st=");
-    Serial2.println(stChar);
     return;
   }
 
@@ -558,30 +546,26 @@ void loop() {
       // detectarEsquina() porque vive en otro case del switch.)
       bool bloqueadoPorObstaculo = piPriority || (piMemoryFrames > 0);
 
-      bool cornerCooldownOk = (millis() - lastTurnTime > cooldownGiro) && (millis() - timeStart > 5000);
-
-      if (cornerCooldownOk && trigTurnFromPi) {
-          // Trigger explícito del Pi — el segmento actual ya se esquivó y el
-          // heading ya se realineó (el Pi solo arma esto tras confirmar 'S').
-          estado        = GIRANDO;
-          anguloGyro    = 0;
-          piPurePursuit = false;
-          trigTurnFromPi = false;
-          Serial.println("Giro disparado por Pi (linea de esquina)");
-      }
-      else if (cornerCooldownOk
+      if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo
-          && detectarEsquina(distL, distR))
+          && detectarEsquina(distL, distR)
+          && millis() - timeStart > 5000) 
       {
-          estado     = GIRANDO;
-          anguloGyro = 0;
-          if (!primerGiro) {
-              direccionIzquierda = (distL > distR);
-              primerGiro         = true;
-          }
-          piPurePursuit = false;
-          Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
+        estado     = GIRANDO;
+        anguloGyro = 0;
+
+        if (!primerGiro) {
+          direccionIzquierda = (distL > distR);
+          primerGiro         = true;
+        }
+
+        // Suspender PP durante el giro — el servo lo controla GIRANDO
+        piPurePursuit = false;
+
+        Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
       }
+      break;
+    }
 
     case RECUPERANDO: {
       velocidadMotor = 180;
