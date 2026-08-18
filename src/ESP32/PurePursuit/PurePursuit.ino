@@ -583,10 +583,8 @@ void loop() {
           piPurePursuit = false;
           Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
       }
-      break;
-    }
-
-      case RECUPERANDO: {
+    break;
+    case RECUPERANDO: {
       velocidadMotor = 180;
       controlPID(distL, distR);   // toma el branch RECUPERANDO de controlPID()
 
