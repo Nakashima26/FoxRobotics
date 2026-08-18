@@ -282,10 +282,6 @@ class PPRuntime:
                 path_points   = []
                 bev_frame     = None
                 bev_obstacles = []
-                current_obs   = []          
-                queued_obs    = []          
-                orange_info   = {"seen": False, "near_y": None}   
-                blue_info     = {"seen": False, "near_y": None}   
                 pp_active     = False
 
                 if self.bev.is_calibrated:
@@ -312,7 +308,7 @@ class PPRuntime:
                         bev_obstacles = self.memory.update(
                             new_obstacles, dt_s, self._last_heading
                         )
-
+                        
                         if bev_frame is not None:
                             line_info = detect_lines(bev_frame)
                             orange_info, blue_info = line_info["Orange"], line_info["Blue"]
