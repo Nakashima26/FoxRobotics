@@ -82,6 +82,7 @@ bool  piPriority   = false;   // prio=1: obstáculo activo en Pi
 int   piMemoryFrames = 0;     // mem=N: frames de memoria restantes
 bool  piPurePursuit = false;  // pp=1: Pi en modo Pure Pursuit
 bool  piReady      = false;
+bool  trigTurnFromPi = false; 
 
 
 unsigned long lastPiMsgMs = 0;
@@ -582,7 +583,7 @@ void loop() {
           piPurePursuit = false;
           Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
       }
-
+    break;
     case RECUPERANDO: {
       velocidadMotor = 180;
       controlPID(distL, distR);   // toma el branch RECUPERANDO de controlPID()
