@@ -83,7 +83,6 @@ int   piMemoryFrames = 0;     // mem=N: frames de memoria restantes
 bool  piPurePursuit = false;  // pp=1: Pi en modo Pure Pursuit
 bool  piReady      = false;
 
-
 unsigned long lastPiMsgMs = 0;
 const unsigned long piTimeoutMs = 800;  // ms sin mensaje → fallback
 
@@ -97,8 +96,7 @@ const float ppSteerGain = 35.0;
 // Cuánto se deflecta el servo por cada grado de PP.  steerDeg sale de la
 // geometría (máx ±35°) y suele quedar corto para la mecánica del servo:
 // súbelo si el carrito gira poco, bájalo si oscila/sobregira.
-float ppServoGain = 1.0;
-float PP_GYRO_BLEND = 0.3;   // 0 = solo vision, 1 = solo gyro. Empieza bajo y sube si sigue derivando.
+float ppServoGain = 2.5;
 
 // ── Boot sincronización con Pi ────────────────────────────────────────────────
 bool piReadyReceived = false;
@@ -106,38 +104,19 @@ unsigned long bootStartMs = 0;
 const unsigned long BOOT_WAIT_PI_MS = 1000;
 
 // ── FSM estados ───────────────────────────────────────────────────────────────
-// RECUPERANDO: la cámara ACABA de dejar de ver un obstáculo (prio 1→0). En vez
-// de que Pure Pursuit intente enderezar solo con lo que ve (lento, impreciso),
-// aquí el wall PID + gyro PID (que YA se calculan siempre, ver controlPID())
-// toman el volante hasta que el robot vuelve a estar centrado/alineado.
-enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO };
+enum Estado { SIGUIENDO, GIRANDO };
 Estado estado = SIGUIENDO;
-
-bool  prioAnterior = false;     // para detectar el flanco de bajada prio 1→0
-const float wallSettleCm    = 8.0;   // |distL-distR| por debajo de esto = "centrado"
-const float headingSettleDeg = 8.0;  // |errorGyro| por debajo de esto = "alineado"
-
-// Red de seguridad: si el robot entra a RECUPERANDO cerca de una esquina real
-// (donde un ultrasónico lee "sin pared" legítimamente, no por desalineación),
-// wallOk puede no cumplirse NUNCA y el estado se quedaría atorado para siempre.
-// Este timeout fuerza la salida aunque wallOk/headingOk no se hayan cumplido.
-unsigned long recuperandoEntryMs = 0;
-const unsigned long recuperandoTimeoutMs = 1500;
 
 // ── Giros ─────────────────────────────────────────────────────────────────────
 bool direccionIzquierda = true;
 bool primerGiro         = false;
 int  AngGiro            = 75;
 unsigned long lastTurnTime = 0;
-int timeStart = 0;
 const int cooldownGiro     = 1500;   // ms entre giros
 
 // ── Detección de esquinas ─────────────────────────────────────────────────────
 int contadorEsquina    = 0;
 const int umbralPared  = 100;   // cm — pared "desaparece" → esquina
-const int esquinaDebounce = 2;  // lecturas consecutivas antes de confiar (evita
-                                 // falsos positivos por reflexión rasante del
-                                 // ultrasónico cuando el chasis yawea fuerte)
 
 // ── Carrera ───────────────────────────────────────────────────────────────────
 int  turnsCompleted      = 0;
@@ -202,7 +181,7 @@ bool detectarEsquina(long distL, long distR) {
   bool apertura = (distL > umbralPared) || (distR > umbralPared);
   if (apertura) contadorEsquina++;
   else          contadorEsquina = 0;
-  return contadorEsquina >= esquinaDebounce;
+  return contadorEsquina >= 1;
 }
 
 
@@ -349,43 +328,18 @@ void controlPID(long distL, long distR) {
     obsBiasNorm   = 0.0;
     outputFinal   = outputWall + outputGyro;
 
-  } else if (estado == RECUPERANDO) {
-    // Recalcular error SIN el cap de ±20 usado en controlPID general
-    float errorGyroRecup = anguloObjetivo - anguloGyro;
-    errorGyroRecup = constrain(errorGyroRecup, -60, 60);   // más margen real
-
-    float outputRecup = KpGyro * errorGyroRecup + KdGyro * ((errorGyroRecup - prevErrorGyro) / dt);
-    prevErrorGyro = errorGyroRecup;
-
-    outputRecup = constrain(outputRecup, -60, 60);   // más rango de servo
-    int servoRecup = constrain(centroServo + (int)outputRecup, 20, 150);   // usar límites físicos reales
-    escribirServo(servoRecup);
-    setMotor(velocidadMotor);
-
-    Serial.print(" | Mode:RECUPERANDO");
-    Serial.print(" | ErrGyro:"); Serial.print(errorGyroRecup);
-    Serial.print(" | OutRecup:"); Serial.print(outputRecup);
-    Serial.print(" | Servo:"); Serial.print(servoRecup);
-    return;
-
   } else if (piPurePursuit) {
     // ── Modo Pure Pursuit ────────────────────────────────────────────────────
     // La Pi ya calculó el ángulo de dirección óptimo siguiendo la centerline.
     // obs = steer_deg / ppSteerGain  →  steerDeg = obs * ppSteerGain = steer_deg
     //   steerDeg > 0 = derecha,  steerDeg < 0 = izquierda  (convención de la Pi).
     float steerDeg = obsBiasNorm * ppSteerGain;
-    steerDeg = constrain(steerDeg, -ppSteerGain, ppSteerGain);
+    steerDeg = constrain(steerDeg, -ppSteerGain, ppSteerGain);  // rango completo ±35
 
-    // Corrección de heading SOLO en recta limpia (sin obstáculo activo ni en
-    // memoria) — cancela la deriva del centerline sin pelear contra PP
-    // cuando sí está esquivando algo.
-    float headingCorr = 0.0;
-    if (!piPriority && piMemoryFrames <= 0) {
-        headingCorr = outputGyro * PP_GYRO_BLEND;   // peso bajo, no domina
-    }
-
-    int servoAngle = centroServo - (int)((steerDeg * ppServoGain) + headingCorr);
-    servoAngle = constrain(servoAngle, 20, 150);
+    // Servo en este robot (ver estado GIRANDO): 150 = izquierda, 20 = derecha,
+    // centro = 80.  Por eso para ir a la DERECHA hay que RESTAR del centro.
+    int servoAngle = centroServo - (int)(steerDeg * ppServoGain);
+    servoAngle = constrain(servoAngle, 20, 150);   // límites físicos del servo
     escribirServo(servoAngle);
     setMotor(velocidadMotor);
 
@@ -460,14 +414,13 @@ void setup() {
   Serial.println("Esperando READY desde Pi...");
   piReadyReceived = false;
   unsigned long waitStart = millis();
-  while (!piReadyReceived) { // && (millis() - waitStart < 30000)) {
+  while (!piReadyReceived && (millis() - waitStart < 30000)) {
     if (Serial2.available()) {
       String line = Serial2.readStringUntil('\n');
       line.trim();
       if (line.indexOf("READY") >= 0) {
         piReadyReceived = true;
         piReady         = true;
-        timeStart = millis();
         Serial.println("Recibido READY. Iniciando.");
       }
     }
@@ -522,34 +475,18 @@ void loop() {
 
     case SIGUIENDO: {
       velocidadMotor = 180;
-
-      // Flanco de bajada: la cámara ACABA de dejar de ver el obstáculo.
-      // Entrar a RECUPERANDO en vez de confiar en que Pure Pursuit se
-      // enderece solo con lo que ve en ese instante incierto.
-      if (prioAnterior && !piPriority) {
-        estado = RECUPERANDO;
-        recuperandoEntryMs = millis();
-        integralWall  = 0; prevErrorWall  = 0;
-        integralGyro  = 0; prevErrorGyro  = 0;
-
-        prioAnterior = piPriority;
-        controlPID(distL, distR);   // ya toma el branch RECUPERANDO (estado ya cambió)
-        break;
-      }
-      prioAnterior = piPriority;
-
       controlPID(distL, distR);
 
-      // No girar si hay obstáculo activo en Pi.  (El gate de heading ya no
-      // hace falta aquí — mientras el chasis sigue desalineado, ese trabajo
-      // lo hace el estado RECUPERANDO, que ni siquiera llega a evaluar
-      // detectarEsquina() porque vive en otro case del switch.)
-      bool bloqueadoPorObstaculo = piPriority || (piMemoryFrames > 0);
+      // No girar si hay obstáculo activo en Pi
+      const float headingSettleDeg = 13.0;   // ajusta según qué tan estricto quieras ser
+      bool headingAligned = abs(errorGyro) < headingSettleDeg;
+
+      bool bloqueadoPorObstaculo = piPriority || (piMemoryFrames > 0) || !headingAligned;
 
       if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo
           && detectarEsquina(distL, distR)
-          && millis() - timeStart > 5000) 
+          && millis() > 9000) 
       {
         estado     = GIRANDO;
         anguloGyro = 0;
@@ -564,27 +501,6 @@ void loop() {
 
         Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
       }
-      break;
-    }
-
-    case RECUPERANDO: {
-      velocidadMotor = 180;
-      controlPID(distL, distR);   // toma el branch RECUPERANDO de controlPID()
-
-      bool wallOk    = abs(errorWall) < wallSettleCm;
-      bool headingOk = abs(errorGyro) < headingSettleDeg;
-      bool timedOut  = (millis() - recuperandoEntryMs) > recuperandoTimeoutMs;
-
-      if (piPriority) {
-        // Reapareció un obstáculo (o uno nuevo) → vuelve a esquivar
-        estado = SIGUIENDO;
-      } else if ((headingOk)) {
-        // Ya centrado y alineado → visión retoma el control normal.
-        // timedOut: red de seguridad si wallOk nunca se cumple (p.ej. cerca
-        // de una esquina real, donde un lado lee "sin pared" legítimamente).
-        estado = SIGUIENDO;
-      }
-      prioAnterior = piPriority;
       break;
     }
 
@@ -625,10 +541,7 @@ void loop() {
   }
 
   // ── Log periódico ─────────────────────────────────────────────────────────
-  Serial.print(" | Estado:");
-  if      (estado == GIRANDO)     Serial.print("GIRANDO");
-  else if (estado == RECUPERANDO) Serial.print("RECUPERANDO");
-  else                             Serial.print("SIGUIENDO");
+  Serial.print(" | Estado:");   Serial.print(estado == GIRANDO ? "GIRANDO" : "SIGUIENDO");
   Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
   Serial.print(" | L:");        Serial.print(distL);
   Serial.print(" | R:");        Serial.print(distR);
