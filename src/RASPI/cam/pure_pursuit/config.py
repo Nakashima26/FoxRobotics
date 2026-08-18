@@ -123,8 +123,6 @@ FAR_HINT_MAX_STEER   = 12.0     # grados máx que puede aportar el hint (<< MAX_
 FAR_HINT_KP          = 0.015   # ganancia proporcional: grados por px de offset
 FAR_HINT_KD          = 0.004   # ganancia derivativa: amortigua saltos por ruido de detección
 CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
-CENTERLINE_RAMP_PX   = 140   # radio de influencia — debe cubrir LOOKAHEAD_PX con margen
-CENTERLINE_SMOOTH_WIN = 5    # ventana de media móvil en X (filas)
 
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=35  →  obs=steer_deg/35

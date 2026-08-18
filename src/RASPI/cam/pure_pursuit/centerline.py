@@ -203,30 +203,49 @@ def detect_centerline(
             cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
 
     # ── 3. Muestreo fila a fila (rampa al lado de paso, no switch binario) ────
-    raw_points: list[tuple[float, int]] = []
+        # ── 3. Muestreo fila a fila ───────────────────────────────────────────────
+     # ── 3. Muestreo fila a fila ───────────────────────────────────────────────
+    points: list[tuple[int, int]] = []
+    influence_r = C.OBS_INFLATE_R + C.OBS_BIAS_SHIFT
+
     for y in range(h - 10, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
-        base_cx = _widest_free_segment(floor_mask[y, :], C.CENTERLINE_MIN_WIDTH)
-        if base_cx is None:
-            continue  # sin piso libre en esta fila, se omite
+        forced_cx: int | None = None
 
-        best_w = 0.0
-        best_cx = float(base_cx)
         for ox, oy, color in bev_obstacles:
-            w = _ramp_weight(y, oy)
-            if w <= 0.0:
-                continue
-            side_cx = _pass_side_cx(free_mask[y, :], ox, color)
-            if side_cx is None:
-                continue
-            if w > best_w:
-                best_w = w
-                best_cx = base_cx + w * (side_cx - base_cx)
+            d = abs(oy - y)
+            if d <= influence_r:
+                iox = int(ox)
+                pref_min = max(1, C.CENTERLINE_MIN_WIDTH // 2)
 
-        raw_points.append((best_cx, y))
+                # Baseline REAL: centro de carril calculado sobre floor_mask
+                # (SIN el obstáculo recortado) — punto de partida "neutral".
+                base_cx = _widest_free_segment(floor_mask[y, :], C.CENTERLINE_MIN_WIDTH)
+                if base_cx is None:
+                    base_cx = iox
 
-    points_f = _smooth_x(raw_points)
-    points_f = _limit_lateral_step(points_f)
-    return [(int(round(x)), y) for x, y in points_f]
+                if color == "Red":
+                    cx_rel = _widest_free_segment(free_mask[y, iox:], pref_min)
+                    full_evade_cx = (iox + cx_rel) if cx_rel is not None else iox + C.OBS_INFLATE_R
+                elif color == "Green":
+                    cx_abs = _widest_free_segment(free_mask[y, :iox], pref_min)
+                    full_evade_cx = cx_abs if cx_abs is not None else iox - C.OBS_INFLATE_R
+                else:
+                    continue
+
+                weight = 1.0 - (d / influence_r)
+                # curva no lineal: sube más rápido al acercarse (raíz cuadrada)
+                weight = weight ** 0.5
+                forced_cx = int(round(base_cx + weight * (full_evade_cx - base_cx)))
+                break
+
+        if forced_cx is not None:
+            points.append((np.clip(forced_cx, 0, w - 1), y))
+        else:
+            cx = _widest_free_segment(free_mask[y, :], C.CENTERLINE_MIN_WIDTH)
+            if cx is not None:
+                points.append((cx, y))
+
+    return points
 
 # ── Visualización BEV ─────────────────────────────────────────────────────────
 
