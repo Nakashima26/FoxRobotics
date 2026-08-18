@@ -204,8 +204,9 @@ def detect_centerline(
 
     # ── 3. Muestreo fila a fila (rampa al lado de paso, no switch binario) ────
         # ── 3. Muestreo fila a fila ───────────────────────────────────────────────
+     # ── 3. Muestreo fila a fila ───────────────────────────────────────────────
     points: list[tuple[int, int]] = []
-    influence_r = C.OBS_INFLATE_R + C.OBS_BIAS_SHIFT   # radio de influencia total (~63 px)
+    influence_r = C.OBS_INFLATE_R + C.OBS_BIAS_SHIFT
 
     for y in range(h - 10, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
         forced_cx: int | None = None
@@ -216,11 +217,11 @@ def detect_centerline(
                 iox = int(ox)
                 pref_min = max(1, C.CENTERLINE_MIN_WIDTH // 2)
 
-                # Punto de carril "normal" (sin esquiva) en esta fila, como referencia
-                # para poder interpolar en vez de saltar directo al extremo.
-                normal_cx = _widest_free_segment(free_mask[y, :], C.CENTERLINE_MIN_WIDTH)
-                if normal_cx is None:
-                    normal_cx = iox  # sin referencia de carril libre, usar el propio obstáculo
+                # Baseline REAL: centro de carril calculado sobre floor_mask
+                # (SIN el obstáculo recortado) — punto de partida "neutral".
+                base_cx = _widest_free_segment(floor_mask[y, :], C.CENTERLINE_MIN_WIDTH)
+                if base_cx is None:
+                    base_cx = iox
 
                 if color == "Red":
                     cx_rel = _widest_free_segment(free_mask[y, iox:], pref_min)
@@ -231,9 +232,10 @@ def detect_centerline(
                 else:
                     continue
 
-                # Rampa: weight=1.0 pegado al obstáculo (d=0), weight=0.0 en el borde de influencia
                 weight = 1.0 - (d / influence_r)
-                forced_cx = int(round(normal_cx + weight * (full_evade_cx - normal_cx)))
+                # curva no lineal: sube más rápido al acercarse (raíz cuadrada)
+                weight = weight ** 0.5
+                forced_cx = int(round(base_cx + weight * (full_evade_cx - base_cx)))
                 break
 
         if forced_cx is not None:
@@ -244,7 +246,6 @@ def detect_centerline(
                 points.append((cx, y))
 
     return points
-
 
 # ── Visualización BEV ─────────────────────────────────────────────────────────
 

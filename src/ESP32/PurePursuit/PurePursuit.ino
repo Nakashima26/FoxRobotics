@@ -96,7 +96,7 @@ const float ppSteerGain = 35.0;
 // Cuánto se deflecta el servo por cada grado de PP.  steerDeg sale de la
 // geometría (máx ±35°) y suele quedar corto para la mecánica del servo:
 // súbelo si el carrito gira poco, bájalo si oscila/sobregira.
-float ppServoGain = 1.2;
+float ppServoGain = 1.5;
 float PP_GYRO_BLEND = 0.3;   // 0 = solo vision, 1 = solo gyro. Empieza bajo y sube si sigue derivando.
 
 // ── Boot sincronización con Pi ────────────────────────────────────────────────
