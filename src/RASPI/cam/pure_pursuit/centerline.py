@@ -248,6 +248,7 @@ def draw_bev_debug(
     bev_obstacles: list[tuple[float, float, str]],
     steer_deg: float = 0.0,
     pp_active: bool = False,
+    line_info: dict | None = None,
 ) -> np.ndarray:
     """
     Dibuja sobre la imagen BEV:
@@ -266,6 +267,22 @@ def draw_bev_debug(
         cv2.circle(out, (int(ox), int(oy)), C.OBS_INFLATE_R,   col_bgr, 1)   # zona bloqueada
         cv2.circle(out, (int(ox), int(oy)), C.OBS_PHYSICAL_R_PX, col_bgr, 2)  # tamaño real de lata
         cv2.circle(out, (int(ox), int(oy)), 4, col_bgr, -1)
+
+    # ── Líneas de esquina ──────────────────────────────────────────
+    if line_info:
+        h, w = out.shape[:2]
+        y_txt = 58
+        for color, col_bgr in (("Orange", (0, 140, 255)), ("Blue", (255, 120, 0))):
+            info = line_info.get(color, {"seen": False, "near_y": None})
+            if info["seen"]:
+                ny = int(info["near_y"])
+                cv2.line(out, (0, ny), (w, ny), col_bgr, 2)          # dónde está la línea
+                close = (C.ROBOT_BEV_Y - ny) <= C.LINE_PROXIMITY_PX
+                txt = f"{color}: y={ny}" + ("  CERCA" if close else "")
+            else:
+                txt = f"{color}: no visto"
+            cv2.putText(out, txt, (6, y_txt), cv2.FONT_HERSHEY_SIMPLEX, 0.42, col_bgr, 1)
+            y_txt += 18
 
     # Centerline
     if len(path_points) > 1:

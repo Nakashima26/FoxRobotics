@@ -202,11 +202,13 @@ class PPRuntime:
         serial_msg:   str,
         fps:          float,
         n_mem:        int,
+        trig:         bool = False,
     ):
         lines = [
             f"fps={fps:.1f}  pp={'ON' if pp_active else 'OFF'}  pts={n_path_pts}",
             f"steer={steer_deg:+.1f} deg  obs={obs_norm:+.3f}",
             f"obs_R={len(positions.get('Red', []))}  obs_G={len(positions.get('Green', []))}  mem={n_mem}",
+            f"trig={'🔔 GIRO!' if trig else 'no'}  tx: {serial_msg[:50]}",  # ← agrega esta línea con trig
             f"tx: {serial_msg[:55]}",
         ]
         y = 22
@@ -387,12 +389,13 @@ class PPRuntime:
                 # ── Display ──────────────────────────────────────────────────
                 self._annotate(processed_frame, steer_deg, obs_norm,
                             pp_active, len(path_points), positions,
-                            serial_msg, fps, len(bev_obstacles))
+                            serial_msg, fps, len(bev_obstacles), trig)
 
                 if bev_frame is not None:
                     bev_debug = draw_bev_debug(
                         bev_frame, path_points, lookahead_pt,
                         bev_obstacles, steer_deg, pp_active,
+                        line_info={"Orange": orange_info, "Blue": blue_info}
                     )
                     bev_h = processed_frame.shape[0]
                     bev_small = cv2.resize(bev_debug, (bev_h, bev_h))
