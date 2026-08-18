@@ -127,8 +127,8 @@ CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
 # ─── Líneas de esquina (trigger de giro) ─────────────────────────────────
 # Marcadores FÍSICOS FIJOS del tapete, presentes en cada esquina, separados
 # ~30° entre sí. Sirven de gatillo de giro independiente del ultrasónico.
-LINE_ORANGE_HSV = [(np.array([7, 90, 150]), np.array([15, 180, 210]))]   # AJUSTAR con tapete real
-LINE_BLUE_HSV   = [(np.array([75, 0, 120]), np.array([100, 40, 255]))]  # AJUSTAR con tapete real
+LINE_ORANGE_HSV = [(np.array([7, 50, 160]), np.array([17, 255, 220]))]   # AJUSTAR con tapete real
+LINE_BLUE_HSV   = [(np.array([100, 20, 50]), np.array([130, 100, 140]))]  # AJUSTAR con tapete real
 
 LINE_MIN_PIXELS   = 40   # píxeles mínimos en BEV para considerar "veo la línea"
 LINE_PROXIMITY_PX = 60   # si el punto más cercano de la línea está a esta
