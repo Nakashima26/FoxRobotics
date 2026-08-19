@@ -97,7 +97,7 @@ const float ppSteerGain = 35.0;
 // geometría (máx ±35°) y suele quedar corto para la mecánica del servo:
 // súbelo si el carrito gira poco, bájalo si oscila/sobregira.
 float ppServoGain = 1.0;
-float PP_GYRO_BLEND = 0.5;   // 0 = solo vision, 1 = solo gyro. Empieza bajo y sube si sigue derivando.
+float PP_GYRO_BLEND = 0.3;   // 0 = solo vision, 1 = solo gyro. Empieza bajo y sube si sigue derivando.
 
 // ── Boot sincronización con Pi ────────────────────────────────────────────────
 bool piReadyReceived = false;
@@ -126,7 +126,7 @@ const unsigned long recuperandoTimeoutMs = 1500;
 // ── Giros ─────────────────────────────────────────────────────────────────────
 bool direccionIzquierda = true;
 bool primerGiro         = false;
-int  AngGiro            = 75;
+int  AngGiro            = 85;
 unsigned long lastTurnTime = 0;
 int timeStart = 0;
 const int cooldownGiro     = 1500;   // ms entre giros
@@ -383,7 +383,7 @@ void controlPID(long distL, long distR) {
         headingCorr = outputGyro * PP_GYRO_BLEND;   // peso bajo, no domina
     }
 
-    int servoAngle = centroServo - (int)((steerDeg * ppServoGain) + headingCorr);
+    int servoAngle = centroServo - (int)((steerDeg * ppServoGain) - headingCorr);
     servoAngle = constrain(servoAngle, 20, 150);
     escribirServo(servoAngle);
     setMotor(velocidadMotor);
