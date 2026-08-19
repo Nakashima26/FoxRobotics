@@ -248,14 +248,26 @@ class SerialLink:
 		print(f"[SERIAL] Thread iniciado, abriendo {self.port}...", flush=True)
 		try:
 			import termios
-			self.fd = os.open(self.port, os.O_RDWR | os.O_NOCTTY)
-			attrs = termios.tcgetattr(self.fd)
-			attrs[2] &= ~(termios.CSTOPB | termios.CSIZE)
-			attrs[2] |= termios.CS8
-			attrs[6][termios.VMIN] = 0
-			attrs[6][termios.VTIME] = 2
-			attrs[4] = attrs[5] = termios.B115200
-			termios.tcsetattr(self.fd, termios.TCSANOW, attrs)
+			iflag, oflag, cflag, lflag, ispeed, ospeed, cc = termios.tcgetattr(self.fd)
+
+			# Modo raw completo — sin esto ICANON sigue activo y VMIN/VTIME
+			# no aplican como se espera; ECHO puede reinyectar bytes recibidos
+			# de vuelta al ESP32 y corromper el siguiente mensaje saliente.
+			iflag &= ~(termios.IGNBRK | termios.BRKINT | termios.PARMRK | termios.ISTRIP |
+			           termios.INLCR  | termios.IGNCR  | termios.ICRNL  | termios.IXON)
+			oflag &= ~termios.OPOST
+			lflag &= ~(termios.ECHO | termios.ECHONL | termios.ICANON |
+			           termios.ISIG | termios.IEXTEN)
+			cflag &= ~(termios.CSIZE | termios.PARENB | termios.CSTOPB)
+			cflag |= termios.CS8 | termios.CLOCAL | termios.CREAD
+
+			cc[termios.VMIN]  = 0
+			cc[termios.VTIME] = 2
+
+			ispeed = ospeed = termios.B115200
+
+			termios.tcsetattr(self.fd, termios.TCSANOW,
+			                   [iflag, oflag, cflag, lflag, ispeed, ospeed, cc])
 			time.sleep(1.0)
 			print(f"[SERIAL] UART abierto en {self.port} @ {self.baudrate}", flush=True)
 			for _ in range(3):
