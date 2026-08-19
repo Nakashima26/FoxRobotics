@@ -78,8 +78,8 @@ FLOOR_UPPER = np.array([35, 80, 255])
 FLOOR_LOWER_BLUE = np.array([105, 80, 60])
 FLOOR_UPPER_BLUE = np.array([120, 220, 130])
 
-FLOOR_LOWER_ORANGE = np.array([7, 90, 150])
-FLOOR_UPPER_ORANGE = np.array([15, 180, 210])
+FLOOR_LOWER_ORANGE = np.array([5, 150, 80])
+FLOOR_UPPER_ORANGE = np.array([16, 255, 220])
 
 # Lista usada por centerline.py — agrega más tuplas aquí si detectas más
 # colores de piso que no quieres que bloqueen la ruta.
