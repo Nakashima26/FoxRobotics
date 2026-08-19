@@ -71,6 +71,8 @@ CALIB_POINT_LABELS = [
 # advierte que probablemente un clic quedó mal puesto.
 CALIB_MAX_MEAN_ERR_PX = 4.0
 
+WALL_MARGIN_PX = 22
+
 # ─── Color del piso (HSV) — tapete WRO: beige / madera cálida ────────────────
 FLOOR_LOWER = np.array([0, 0, 140])
 FLOOR_UPPER = np.array([35, 80, 255])

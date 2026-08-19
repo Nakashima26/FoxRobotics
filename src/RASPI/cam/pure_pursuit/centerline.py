@@ -177,9 +177,7 @@ def detect_centerline(
 
     # ── 1. Máscara de piso ────────────────────────────────────────────────────
     hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
-    floor_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
-    for lower, upper in C.FLOOR_COLOR_RANGES:
-        floor_mask |= cv2.inRange(hsv, lower, upper)
+    floor_mask = cv2.inRange(hsv, C.FLOOR_LOWER, C.FLOOR_UPPER)
 
     k3 = np.ones((3, 3), np.uint8)
     k5 = np.ones((5, 5), np.uint8)
@@ -204,11 +202,26 @@ def detect_centerline(
             cx_bias = ix + C.OBS_BIAS_SHIFT
             cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
 
+    # ── 2b. Margen de seguridad contra CUALQUIER borde no-piso (pared incl.) ──
+    # distanceTransform da, por pixel libre, la distancia al pixel no-libre
+    # más cercano (pared, obstáculo, borde de imagen fuera del piso, etc.).
+    # safe_mask solo deja pixeles a >= WALL_MARGIN_PX de cualquier borde así,
+    # evitando que el centerline se pegue a la pared cuando el robot la mira
+    # de frente y solo ve un triángulo de piso pegado a la esquina.
+    dist = cv2.distanceTransform(free_mask, cv2.DIST_L2, 5)
+    safe_mask = np.where(dist >= C.WALL_MARGIN_PX, free_mask, 0).astype(np.uint8)
+
     # ── 3. Muestreo fila a fila (rampa al lado de paso, no switch binario) ────
     points: list[tuple[float, int]] = []
     for y in range(h - 10, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
         row = free_mask[y, :]
-        free_cx = _widest_free_segment(row, C.CENTERLINE_MIN_WIDTH)
+
+        # Preferir el hueco con margen de seguridad; si no hay (pasillo
+        # angosto o casi todo ocluido), caer al hueco libre normal — mejor
+        # tener un path ajustado que no tener path.
+        free_cx = _widest_free_segment(safe_mask[y, :], C.CENTERLINE_MIN_WIDTH)
+        if free_cx is None:
+            free_cx = _widest_free_segment(row, C.CENTERLINE_MIN_WIDTH)
 
         best_w = 0.0
         pass_cx: int | None = None
