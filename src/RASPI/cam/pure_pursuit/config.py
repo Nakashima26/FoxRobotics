@@ -85,8 +85,8 @@ FLOOR_UPPER_BLUE_WIDE = np.array([150, 255, 230])
 
 WALL_STRUCTURE_PX = 15   # <-- ajusta viendo tu imagen BEV real
 
-FLOOR_LOWER_ORANGE = np.array([12, 110, 80])
-FLOOR_UPPER_ORANGE = np.array([30, 255, 255])
+FLOOR_LOWER_ORANGE = np.array([1,  70, 130])
+FLOOR_UPPER_ORANGE = np.array([17, 160, 220])
 
 # Lista usada por centerline.py — agrega más tuplas aquí si detectas más
 # colores de piso que no quieres que bloqueen la ruta.
