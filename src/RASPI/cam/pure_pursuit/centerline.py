@@ -152,6 +152,53 @@ def _limit_lateral_step(points: list[tuple[float, int]]) -> list[tuple[float, in
     return out
 
 
+def _extract_thin_blue_line(hsv: np.ndarray, shape: tuple) -> np.ndarray:
+    """
+    Separa la cinta azul delgada de la pared azul/gris gruesa dentro del
+    candidato de color 'ancho'.
+
+    Estrategia:
+      1. Umbral ancho de azul (FLOOR_LOWER_BLUE_WIDE/UPPER) — atrapa tanto la
+         cinta lejana (se ve grisácea) como la pared.
+      2. Apertura morfológica con kernel ~WALL_STRUCTURE_PX: solo sobreviven
+         blobs más gruesos que el kernel → eso es pared.
+      3. Blobs que tocan el borde de la imagen BEV se tratan también como
+         pared/fuera de pista (la cinta guía siempre está dentro del área).
+      4. Lo que resta del candidato ancho, quitando lo anterior (dilatado un
+         poco para limpiar bordes), es la línea delgada real.
+    """
+    h, w = shape[:2]
+    blue_wide = cv2.inRange(hsv, C.FLOOR_LOWER_BLUE_WIDE, C.FLOOR_UPPER_BLUE_WIDE)
+
+    if cv2.countNonZero(blue_wide) == 0:
+        return blue_wide
+
+    k_wall = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (C.WALL_STRUCTURE_PX, C.WALL_STRUCTURE_PX)
+    )
+
+    # Blobs gruesos que sobreviven a la apertura = pared.
+    wall_blobs = cv2.morphologyEx(blue_wide, cv2.MORPH_OPEN, k_wall)
+
+    # Componentes conectados del candidato ancho: descarta también los que
+    # tocan el borde de la imagen BEV (casi siempre pared, nunca la cinta
+    # guía que vive dentro del área jugable).
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(blue_wide, connectivity=8)
+    border_blobs = np.zeros_like(blue_wide)
+    for i in range(1, n):
+        x, y, bw, bh, _area = stats[i]
+        touches_border = (x <= 0 or y <= 0 or (x + bw) >= w or (y + bh) >= h)
+        if touches_border:
+            border_blobs[labels == i] = 255
+
+    # Unir pared detectada por grosor + pared detectada por tocar el borde,
+    # dilatar un poco para no dejar un halo de línea pegado a la pared.
+    not_line = cv2.bitwise_or(wall_blobs, border_blobs)
+    not_line = cv2.dilate(not_line, k_wall)
+
+    thin_blue_line = cv2.bitwise_and(blue_wide, cv2.bitwise_not(not_line))
+    return thin_blue_line
+
 # ── Detección de centerline ───────────────────────────────────────────────────
 
 def detect_centerline(
@@ -177,9 +224,17 @@ def detect_centerline(
 
     # ── 1. Máscara de piso ────────────────────────────────────────────────────
     hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
+
+    # 1a. Piso "seguro": beige/naranja/azul estricto — nunca confunde pared.
     floor_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
     for lower, upper in C.FLOOR_COLOR_RANGES:
-        floor_mask |= cv2.inRange(hsv, lower, upper)  
+        floor_mask |= cv2.inRange(hsv, lower, upper)
+
+    # 1b. Línea azul delgada filtrada por FORMA (no solo color): un candidato
+    # de color azul "ancho" (atrapa línea lejana grisácea + pared) se separa
+    # en blobs gruesos (pared) vs delgados (cinta) usando apertura morfológica.
+    thin_blue_line = _extract_thin_blue_line(hsv, bev_bgr.shape)
+    floor_mask |= thin_blue_line
 
     k3 = np.ones((3, 3), np.uint8)
     k5 = np.ones((5, 5), np.uint8)
