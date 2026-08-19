@@ -77,8 +77,8 @@ WALL_MARGIN_PX = 22
 FLOOR_LOWER = np.array([0, 0, 140])
 FLOOR_UPPER = np.array([35, 80, 255])
 
-FLOOR_LOWER_BLUE = np.array([85, 30, 5])
-FLOOR_UPPER_BLUE = np.array([160, 255, 240])
+FLOOR_LOWER_BLUE = np.array([100, 35, 35]) 
+FLOOR_UPPER_BLUE = np.array([135, 255, 255])
 
 FLOOR_LOWER_ORANGE = np.array([0, 50, 10])
 FLOOR_UPPER_ORANGE = np.array([35, 255, 245])
