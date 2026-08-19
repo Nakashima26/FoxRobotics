@@ -75,8 +75,8 @@ CALIB_MAX_MEAN_ERR_PX = 4.0
 FLOOR_LOWER = np.array([0, 0, 140])
 FLOOR_UPPER = np.array([35, 80, 255])
 
-FLOOR_LOWER_BLUE = np.array([105, 80, 60])
-FLOOR_UPPER_BLUE = np.array([120, 220, 130])
+FLOOR_LOWER_BLUE = np.array([100, 80, 20])
+FLOOR_UPPER_BLUE = np.array([130, 255, 200])
 
 FLOOR_LOWER_ORANGE = np.array([5, 150, 80])
 FLOOR_UPPER_ORANGE = np.array([16, 255, 220])
