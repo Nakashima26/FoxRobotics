@@ -75,6 +75,20 @@ CALIB_MAX_MEAN_ERR_PX = 4.0
 FLOOR_LOWER = np.array([0,   0,  40])
 FLOOR_UPPER = np.array([180, 60, 240])
 
+FLOOR_LOWER_BLUE = np.array([95,  60,  40])
+FLOOR_UPPER_BLUE = np.array([130, 255, 255])
+
+FLOOR_LOWER_ORANGE = np.array([5,  100,  60])
+FLOOR_UPPER_ORANGE = np.array([18, 255, 255])
+
+# Lista usada por centerline.py — agrega más tuplas aquí si detectas más
+# colores de piso que no quieres que bloqueen la ruta.
+FLOOR_COLOR_RANGES = [
+    (FLOOR_LOWER, FLOOR_UPPER),
+    (FLOOR_LOWER_BLUE, FLOOR_UPPER_BLUE),
+    (FLOOR_LOWER_ORANGE, FLOOR_UPPER_ORANGE),
+]
+
 # ─── Detección de centerline ──────────────────────────────────────────────────
 CENTERLINE_ROW_STEP  = 15    # muestrear cada N filas
 CENTERLINE_MIN_WIDTH = 20    # píxeles mínimos de espacio libre para aceptar fila

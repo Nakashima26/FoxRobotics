@@ -177,7 +177,9 @@ def detect_centerline(
 
     # ── 1. Máscara de piso ────────────────────────────────────────────────────
     hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
-    floor_mask = cv2.inRange(hsv, C.FLOOR_LOWER, C.FLOOR_UPPER)
+    floor_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+    for lower, upper in C.FLOOR_COLOR_RANGES:
+        floor_mask |= cv2.inRange(hsv, lower, upper)
 
     k3 = np.ones((3, 3), np.uint8)
     k5 = np.ones((5, 5), np.uint8)
