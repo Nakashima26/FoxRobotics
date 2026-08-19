@@ -126,7 +126,7 @@ const unsigned long recuperandoTimeoutMs = 1500;
 // ── Giros ─────────────────────────────────────────────────────────────────────
 bool direccionIzquierda = true;
 bool primerGiro         = false;
-int  AngGiro            = 85;
+int  AngGiro            =82;
 unsigned long lastTurnTime = 0;
 int timeStart = 0;
 const int cooldownGiro     = 1500;   // ms entre giros

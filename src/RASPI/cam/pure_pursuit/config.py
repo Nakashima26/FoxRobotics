@@ -77,11 +77,11 @@ WALL_MARGIN_PX = 22
 FLOOR_LOWER = np.array([0, 0, 140])
 FLOOR_UPPER = np.array([35, 80, 255])
 
-FLOOR_LOWER_BLUE = np.array([100, 80, 20])
-FLOOR_UPPER_BLUE = np.array([130, 255, 200])
+FLOOR_LOWER_BLUE = np.array([95, 50, 10])
+FLOOR_UPPER_BLUE = np.array([150, 255, 220])
 
-FLOOR_LOWER_ORANGE = np.array([5, 150, 80])
-FLOOR_UPPER_ORANGE = np.array([16, 255, 220])
+FLOOR_LOWER_ORANGE = np.array([3, 70, 15])
+FLOOR_UPPER_ORANGE = np.array([30, 255, 240])
 
 # Lista usada por centerline.py — agrega más tuplas aquí si detectas más
 # colores de piso que no quieres que bloqueen la ruta.
