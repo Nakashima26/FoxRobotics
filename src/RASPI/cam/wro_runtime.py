@@ -248,6 +248,7 @@ class SerialLink:
 		print(f"[SERIAL] Thread iniciado, abriendo {self.port}...", flush=True)
 		try:
 			import termios
+			self.fd = os.open(self.port, os.O_RDWR | os.O_NOCTTY)
 			iflag, oflag, cflag, lflag, ispeed, ospeed, cc = termios.tcgetattr(self.fd)
 
 			# Modo raw completo — sin esto ICANON sigue activo y VMIN/VTIME
