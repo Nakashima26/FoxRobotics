@@ -71,15 +71,22 @@ CALIB_POINT_LABELS = [
 # advierte que probablemente un clic quedó mal puesto.
 CALIB_MAX_MEAN_ERR_PX = 4.0
 
+WALL_MARGIN_PX = 22
+
 # ─── Color del piso (HSV) — tapete WRO: beige / madera cálida ────────────────
 FLOOR_LOWER = np.array([0, 0, 140])
 FLOOR_UPPER = np.array([35, 80, 255])
 
-FLOOR_LOWER_BLUE = np.array([100, 80, 20])
-FLOOR_UPPER_BLUE = np.array([130, 255, 200])
+FLOOR_LOWER_BLUE = np.array([95, 50, 10])
+FLOOR_UPPER_BLUE = np.array([150, 255, 220])
 
-FLOOR_LOWER_ORANGE = np.array([5, 150, 80])
-FLOOR_UPPER_ORANGE = np.array([16, 255, 220])
+FLOOR_LOWER_BLUE_WIDE = np.array([90, 15, 60])   # baja el mínimo de S y sube V
+FLOOR_UPPER_BLUE_WIDE = np.array([150, 255, 230])
+
+WALL_STRUCTURE_PX = 15   # <-- ajusta viendo tu imagen BEV real
+
+FLOOR_LOWER_ORANGE = np.array([1,  70, 130])
+FLOOR_UPPER_ORANGE = np.array([17, 160, 220])
 
 # Lista usada por centerline.py — agrega más tuplas aquí si detectas más
 # colores de piso que no quieres que bloqueen la ruta.
