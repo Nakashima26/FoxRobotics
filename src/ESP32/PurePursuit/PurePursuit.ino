@@ -91,7 +91,7 @@ float visionSteerGain = 80.0;
 float turnHintGain    = 7.0;
 
 // Ganancia Pure Pursuit: obs = steer_deg / 35 → steerDeg = obs * 35 = steer_deg
-const float ppSteerGain = 35.0;
+const float ppSteerGain = 60.0;
 
 // Cuánto se deflecta el servo por cada grado de PP.  steerDeg sale de la
 // geometría (máx ±35°) y suele quedar corto para la mecánica del servo:
