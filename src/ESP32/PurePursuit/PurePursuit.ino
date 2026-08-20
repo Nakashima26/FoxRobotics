@@ -98,6 +98,7 @@ const float ppSteerGain = 35.0;
 // súbelo si el carrito gira poco, bájalo si oscila/sobregira.
 float ppServoGain = 1.0;
 float PP_GYRO_BLEND = 0.3;   // 0 = solo vision, 1 = solo gyro. Empieza bajo y sube si sigue derivando.
+float PP_WALL_BLEND = .15;
 
 // ── Boot sincronización con Pi ────────────────────────────────────────────────
 bool piReadyReceived = false;
@@ -177,7 +178,7 @@ long leerDistancia(int trig, int echo) {
   delayMicroseconds(10);
   digitalWrite(trig, LOW);
 
-  long dur  = pulseIn(echo, HIGH, 5000);
+  long dur  = pulseIn(echo, HIGH, 7000);
   long dist = dur * 0.034 / 2;
   if (dist == 0 || dist > 200) dist = 200;
   return dist;
@@ -379,11 +380,14 @@ void controlPID(long distL, long distR) {
     // memoria) — cancela la deriva del centerline sin pelear contra PP
     // cuando sí está esquivando algo.
     float headingCorr = 0.0;
+    float wallCorr     = 0.0;
+
     if (!piPriority && piMemoryFrames <= 0) {
         headingCorr = outputGyro * PP_GYRO_BLEND;   // peso bajo, no domina
+        wallCorr    = outputWall * PP_WALL_BLEND;
     }
 
-    int servoAngle = centroServo - (int)((steerDeg * ppServoGain) - headingCorr);
+    int servoAngle = centroServo - (int)((steerDeg * ppServoGain) - headingCorr - wallCorr);
     servoAngle = constrain(servoAngle, 20, 150);
     escribirServo(servoAngle);
     setMotor(velocidadMotor);
