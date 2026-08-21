@@ -58,34 +58,30 @@ class PurePursuitController:
         robot_x: int = C.ROBOT_BEV_X,
         robot_y: int = C.ROBOT_BEV_Y,
         lookahead_px: float = C.LOOKAHEAD_PX,
+        bev_obstacles: list[tuple[float, float, str]] | None = None,
     ) -> tuple[float, tuple[float, float]]:
-        """
-        Calcula el ángulo de dirección y el punto look-ahead.
-
-        lookahead_px: distancia look-ahead a usar ESTE frame. Pásale el valor
-        de adaptive_lookahead() para que se acorte cerca de obstáculos y así
-        el steer resultante sea geométricamente más cerrado.
-
-        Retorna:
-          steer_deg    : ángulos en grados, + = derecha, - = izquierda
-          lookahead_pt : (x, y) en coords BEV del punto objetivo
-        """
         if not path_points:
             return 0.0, (float(robot_x), float(robot_y))
 
-        target = path_points[-1]
-        for pt in path_points:
-            dist = math.hypot(pt[0] - robot_x, pt[1] - robot_y)
-            if dist >= lookahead_px:
-                target = pt
-                break
+        if bev_obstacles:
+            lo, hi = lookahead_px * 0.5, lookahead_px * 1.8
+            candidates = [
+                pt for pt in path_points
+                if lo <= math.hypot(pt[0] - robot_x, pt[1] - robot_y) <= hi
+            ] or path_points
+            target = max(candidates, key=lambda pt: abs(pt[0] - robot_x))
+        else:
+            target = path_points[-1]
+            for pt in path_points:
+                dist = math.hypot(pt[0] - robot_x, pt[1] - robot_y)
+                if dist >= lookahead_px:
+                    target = pt
+                    break
 
         dx = target[0] - robot_x
         dy = robot_y - target[1]
         ld = max(1.0, math.hypot(dx, dy))
-
         alpha = math.atan2(dx, dy)
-
         steer_rad = math.atan2(2.0 * C.WHEELBASE_PX * math.sin(alpha), ld)
         steer_deg = math.degrees(steer_rad)
         steer_deg = max(-C.MAX_STEER_DEG, min(C.MAX_STEER_DEG, steer_deg))

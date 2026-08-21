@@ -121,8 +121,9 @@ def _pass_side_cx(row_mask: np.ndarray, safe_row_mask: np.ndarray, ox: float, co
     return None
 
 
-def _smooth_x(points: list[tuple[float, int]]) -> list[tuple[float, int]]:
-    """Media móvil corta en X con padding de borde (no tira los extremos a 0)."""
+def _smooth_x(points: list[tuple[float, int]], weights: list[float] | None = None) -> list[tuple[float, int]]:
+    """Media móvil corta en X — NO suaviza filas con esquiva activa (weight alto),
+    para no aplanar el pico de offset justo donde más importa."""
     n = len(points)
     win = int(C.CENTERLINE_SMOOTH_WIN)
     if n < 3 or win < 3:
@@ -134,21 +135,35 @@ def _smooth_x(points: list[tuple[float, int]]) -> list[tuple[float, int]]:
     pad = win // 2
     padded = np.pad(xs, pad, mode="edge")
     xs_s = np.convolve(padded, kernel, mode="valid")
+
+    if weights is not None:
+        w_thresh = 0.05
+        for i, wgt in enumerate(weights):
+            if wgt > w_thresh:
+                xs_s[i] = xs[i]   # zona de esquiva: usar el valor crudo, sin promediar
+
     return [(float(xs_s[i]), points[i][1]) for i in range(n)]
 
 
-def _limit_lateral_step(points: list[tuple[float, int]]) -> list[tuple[float, int]]:
+def _limit_lateral_step(points: list[tuple[float, int]], weights: list[float] | None = None) -> list[tuple[float, int]]:
     """
-    Acota |Δx| entre filas consecutivas a lo que el servo puede (tan(δ_max)·Δy).
-    Recorre desde el robot (primer punto) hacia adelante.
+    Acota |Δx| entre filas consecutivas a lo que el servo puede.
+    El cap se RELAJA proporcionalmente al peso de esquiva (weight): en zona
+    libre protege contra ruido; en zona de esquiva activa permite alcanzar
+    el offset completo rápido, porque ahí la urgencia real manda y
+    controller.compute() ya aplica el límite físico real vía geometría.
     """
     if len(points) < 2:
         return points
-    max_dx = math.tan(math.radians(C.MAX_STEER_DEG)) * float(C.CENTERLINE_ROW_STEP)
+    base_max_dx = math.tan(math.radians(C.MAX_STEER_DEG)) * float(C.CENTERLINE_ROW_STEP)
+    relax = float(getattr(C, "CENTERLINE_URGENCY_RELAX", 3.0))
+
     out: list[tuple[float, int]] = [points[0]]
     prev_x = float(points[0][0])
     for i in range(1, len(points)):
         x, y = points[i]
+        wgt = weights[i] if weights is not None else 0.0
+        max_dx = base_max_dx * (1.0 + wgt * (relax - 1.0))
         dx = x - prev_x
         if dx > max_dx:
             x = prev_x + max_dx
@@ -276,13 +291,12 @@ def detect_centerline(
     safe_mask = np.where(dist >= C.WALL_MARGIN_PX, free_mask, 0).astype(np.uint8)
 
     # ── 3. Muestreo fila a fila (rampa al lado de paso, no switch binario) ────
+        # ── 3. Muestreo fila a fila ────────────────────────────────────────────
     points: list[tuple[float, int]] = []
+    weights: list[float] = []
     for y in range(h - 10, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
         row = free_mask[y, :]
 
-        # Preferir el hueco con margen de seguridad; si no hay (pasillo
-        # angosto o casi todo ocluido), caer al hueco libre normal — mejor
-        # tener un path ajustado que no tener path.
         free_cx = _widest_free_segment(safe_mask[y, :], C.CENTERLINE_MIN_WIDTH)
         if free_cx is None:
             free_cx = _widest_free_segment(row, C.CENTERLINE_MIN_WIDTH)
@@ -300,7 +314,16 @@ def detect_centerline(
                     pass_cx = cx_side
 
         if free_cx is None and pass_cx is None:
+            # Sin hueco válido en esta fila: no dejar un vacío en el path —
+            # usar el pixel con mayor margen de seguridad (distanceTransform),
+            # que ya calculamos arriba para safe_mask.
+            row_dist = dist[y, :]
+            if row_dist.max() > 0:
+                cx_fallback = float(np.argmax(row_dist))
+                points.append((float(np.clip(cx_fallback, 0, w - 1)), y))
+                weights.append(best_w)
             continue
+
         if free_cx is None:
             assert pass_cx is not None
             cx = float(pass_cx)
@@ -310,10 +333,11 @@ def detect_centerline(
             cx = (1.0 - best_w) * float(free_cx) + best_w * float(pass_cx)
 
         points.append((float(np.clip(cx, 0, w - 1)), y))
+        weights.append(best_w)
 
     if points:
-        points = _smooth_x(points)
-        points = _limit_lateral_step(points)
+        points = _limit_lateral_step(points, weights)
+        points = _smooth_x(points, weights)
 
     return [(int(round(np.clip(x, 0, w - 1))), int(y)) for x, y in points]
 

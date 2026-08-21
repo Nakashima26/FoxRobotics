@@ -306,6 +306,7 @@ class PPRuntime:
                             steer_deg, lookahead_pt = self.controller.compute(
                                 path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y,
                                 lookahead_px=lookahead_eff,
+                                bev_obstacles=bev_obstacles,
                             )
                             pp_active = True
 
