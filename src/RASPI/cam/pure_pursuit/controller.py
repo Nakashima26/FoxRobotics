@@ -52,6 +52,18 @@ class PurePursuitController:
         )
         return C.LOOKAHEAD_MIN_PX + t * (C.LOOKAHEAD_MAX_PX - C.LOOKAHEAD_MIN_PX)
 
+    @staticmethod
+    def _distance_steer_gain(bev_obstacles, robot_x, robot_y) -> float:
+        if not bev_obstacles:
+            return 1.0
+        nearest_d = min(math.hypot(ox - robot_x, oy - robot_y) for ox, oy, _ in bev_obstacles)
+        if nearest_d <= C.STEER_DIST_GAIN_NEAR_PX:
+            return 1.0
+        if nearest_d >= C.STEER_DIST_GAIN_FAR_PX:
+            return C.STEER_DIST_GAIN_MIN
+        t = (nearest_d - C.STEER_DIST_GAIN_NEAR_PX) / (C.STEER_DIST_GAIN_FAR_PX - C.STEER_DIST_GAIN_NEAR_PX)
+        return 1.0 - t * (1.0 - C.STEER_DIST_GAIN_MIN)
+
     def compute(
         self,
         path_points: list[tuple[int, int]],
@@ -64,8 +76,6 @@ class PurePursuitController:
             return 0.0, (float(robot_x), float(robot_y))
 
         if bev_obstacles:
-            # Ventana angosta alrededor del lookahead real — solo evita caer
-            # exactamente en un punto de transición, no busca el offset máximo global.
             lo, hi = lookahead_px * 0.85, lookahead_px * 1.25
             candidates = [
                 pt for pt in path_points
@@ -74,7 +84,6 @@ class PurePursuitController:
             if candidates:
                 target = max(candidates, key=lambda pt: abs(pt[0] - robot_x))
             else:
-                # fallback al comportamiento original si no hay candidatos en rango
                 target = path_points[-1]
                 for pt in path_points:
                     if math.hypot(pt[0] - robot_x, pt[1] - robot_y) >= lookahead_px:
@@ -83,7 +92,8 @@ class PurePursuitController:
         else:
             target = path_points[-1]
             for pt in path_points:
-                if math.hypot(pt[0] - robot_x, pt[1] - robot_y) >= lookahead_px:
+                dist = math.hypot(pt[0] - robot_x, pt[1] - robot_y)
+                if dist >= lookahead_px:
                     target = pt
                     break
 
@@ -92,7 +102,14 @@ class PurePursuitController:
         ld = max(1.0, math.hypot(dx, dy))
         alpha = math.atan2(dx, dy)
         steer_rad = math.atan2(2.0 * C.WHEELBASE_PX * math.sin(alpha), ld)
+
         steer_deg = math.degrees(steer_rad)
+
+        # ── NUEVO: atenúa el steer si el obstáculo más cercano aún está lejos ──
+        if bev_obstacles:
+            gain = self._distance_steer_gain(bev_obstacles, robot_x, robot_y)
+            steer_deg *= gain
+
         steer_deg = max(-C.MAX_STEER_DEG, min(C.MAX_STEER_DEG, steer_deg))
 
         return steer_deg, (float(target[0]), float(target[1]))

@@ -100,7 +100,7 @@ FLOOR_COLOR_RANGES = [
 CENTERLINE_ROW_STEP  = 15    # muestrear cada N filas
 CENTERLINE_MIN_WIDTH = 20    # píxeles mínimos de espacio libre para aceptar fila
 CENTERLINE_TOP_Y     = BEV_H // 3   # no subir más allá de 1/3 de la imagen
-CENTERLINE_RAMP_PX   = 200   # horizonte de anticipo: empieza a abrir el path
+CENTERLINE_RAMP_PX   = 260   # horizonte de anticipo: empieza a abrir el path
                              # hacia el lado de paso a esta distancia Y de la lata
                              # (200 px ≈ 400 mm; debe ser > LOOKAHEAD_PX)
 CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-muestreo
@@ -125,10 +125,16 @@ MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 # Lookahead variable
 LOOKAHEAD_MIN_PX      = 45.0    # lookahead mínimo -> steer más agresivo posible
 LOOKAHEAD_MAX_PX      = 100.0   # lookahead normal en pista libre
-LOOKAHEAD_OBS_NEAR_PX = 120.0   # obstáculo a esta distancia (o menos) del robot -> lookahead mínimo
-LOOKAHEAD_OBS_FAR_PX  = 260.0   # obstáculo a esta distancia (o más) -> ya no afecta el lookahead
+LOOKAHEAD_OBS_NEAR_PX = 150.0   # obstáculo a esta distancia (o menos) del robot -> lookahead mínimo
+LOOKAHEAD_OBS_FAR_PX  = 320.0   # obstáculo a esta distancia (o más) -> ya no afecta el lookahead
 
 CENTERLINE_URGENCY_RELAX = 1.6
+
+# Suaviza el steer de esquiva cuando el obstáculo aún no está crítico.
+# 1.0 = sin atenuar (comportamiento actual). <1.0 = atenúa steer a media distancia.
+STEER_DIST_GAIN_NEAR_PX = 100.0   # a esta distancia (o menos) → gain = 1.0 (full)
+STEER_DIST_GAIN_FAR_PX  = 280.0   # a esta distancia (o más) → gain = STEER_DIST_GAIN_MIN
+STEER_DIST_GAIN_MIN     = 0.55    # atenuación en el extremo lejano
 
 # ─── Memoria de obstáculos (mapa rodante disperso) — obstacle_memory.py ───────
 # El robot recuerda las latas vistas y las "arrastra" hacia sí mismo cuadro a
