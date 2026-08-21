@@ -117,6 +117,7 @@ class PPRuntime:
         # Estado de la memoria rodante
         self._last_heading: float | None = None
         self._last_update_t: float | None = None
+        self._prev_estado: str | None = None 
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
