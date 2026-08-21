@@ -109,6 +109,42 @@ class ObstacleMemory:
                 if len(self._obs) < C.OBS_MEM_MAX:
                     self._obs.append(_Obs(nx, ny, color, C.OBS_MEM_REFRESH))
 
+    # ── Reduce duplicados fantasma ─────────────────────────────────────────────────────────────────
+    def _dedupe(self):
+        """
+        Si dos (o más) registros del mismo color quedan a menos de
+        OBS_MEM_DEDUPE_PX entre sí, son casi seguro la MISMA lata física
+        vista/proyectada dos veces (drift de velocidad asumida, re-detección
+        que no hizo match, etc). Los fusiona en uno solo:
+          - posición: la del registro con mayor confianza (más "fresco")
+          - confianza: la máxima entre los fusionados
+        y descarta el resto para que no sigan bloqueando espacio en
+        centerline.py.
+        """
+        if len(self._obs) < 2:
+            return
+
+        dedupe_r2 = C.OBS_MEM_DEDUPE_PX ** 2
+        # Procesar de mayor a menor confianza: el más confiable "absorbe"
+        # a los cercanos de menor confianza.
+        ordered = sorted(self._obs, key=lambda o: o.conf, reverse=True)
+        kept: list[_Obs] = []
+
+        for o in ordered:
+            merged_into_existing = False
+            for k in kept:
+                if k.color != o.color:
+                    continue
+                d2 = (k.x - o.x) ** 2 + (k.y - o.y) ** 2
+                if d2 <= dedupe_r2:
+                    # o es un duplicado de k (k ya tiene >= confianza) → descartar o
+                    merged_into_existing = True
+                    break
+            if not merged_into_existing:
+                kept.append(o)
+
+        self._obs = kept
+
     # ── Poda ────────────────────────────────────────────────────────────────────
 
     def _prune(self):

@@ -47,7 +47,7 @@ class Vision:
             "Red": [(np.array([0, 130, 40]), np.array([9, 255, 130])),
                      (np.array([170, 130, 40]), np.array([179, 255, 130]))],
             # Competition green RGB(68,214,44) → HSV≈(56, 203, 214)
-            "Green": [(np.array([42, 100, 50]), np.array([58, 255, 140]))],           
+            "Green": [(np.array([35,60,40]), np.array([75, 255, 200]))],           
             # "Pink": [(np.array([140, 100, 100]), np.array([170, 255, 255]))],
         }
 

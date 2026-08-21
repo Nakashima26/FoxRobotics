@@ -100,17 +100,24 @@ def _ramp_weight(row_y: int, obs_y: float) -> float:
     return max(0.0, 1.0 + (d + full_r) / full_r)
 
 
-def _pass_side_cx(row_mask: np.ndarray, ox: float, color: str) -> int | None:
-    """Centro del hueco libre del lado WRO correcto en esta fila."""
+def _pass_side_cx(row_mask: np.ndarray, safe_row_mask: np.ndarray, ox: float, color: str) -> int | None:
+    """Centro del hueco libre del lado WRO correcto en esta fila, priorizando piso a distancia segura de la pared."""
     iox = int(ox)
     iox = max(0, min(iox, row_mask.shape[0] - 1))
     pref_min = max(1, C.CENTERLINE_MIN_WIDTH // 2)
+
     if color == "Red":
-        cx_rel = _widest_free_segment(row_mask[iox:], pref_min)
+        cx_rel = _widest_free_segment(safe_row_mask[iox:], pref_min)
+        if cx_rel is None:
+            cx_rel = _widest_free_segment(row_mask[iox:], pref_min)  # fallback sin margen
         return (iox + cx_rel) if cx_rel is not None else iox + C.OBS_PHYSICAL_R_PX
+
     if color == "Green":
-        cx_abs = _widest_free_segment(row_mask[:iox], pref_min)
+        cx_abs = _widest_free_segment(safe_row_mask[:iox], pref_min)
+        if cx_abs is None:
+            cx_abs = _widest_free_segment(row_mask[:iox], pref_min)
         return cx_abs if cx_abs is not None else iox - C.OBS_PHYSICAL_R_PX
+
     return None
 
 
@@ -287,7 +294,7 @@ def detect_centerline(
                 continue
             wgt = _ramp_weight(y, oy)
             if wgt > best_w:
-                cx_side = _pass_side_cx(row, ox, color)
+                cx_side = _pass_side_cx(row, safe_mask[y, :], ox, color)
                 if cx_side is not None:
                     best_w = wgt
                     pass_cx = cx_side
