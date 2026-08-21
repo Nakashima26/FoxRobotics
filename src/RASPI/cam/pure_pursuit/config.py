@@ -122,6 +122,13 @@ WHEELBASE_PX   = 50.0    # batalla del vehículo en px BEV   (= 100 mm)
 MAX_STEER_DEG  = 60.0    # límite mecánico del servo en grados
 MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 
+# Lookahead variable
+LOOKAHEAD_MIN_PX      = 45.0    # lookahead mínimo -> steer más agresivo posible
+LOOKAHEAD_MAX_PX      = 100.0   # lookahead normal en pista libre
+LOOKAHEAD_OBS_NEAR_PX = 120.0   # obstáculo a esta distancia (o menos) del robot -> lookahead mínimo
+LOOKAHEAD_OBS_FAR_PX  = 260.0   # obstáculo a esta distancia (o más) -> ya no afecta el lookahead
+
+
 # ─── Memoria de obstáculos (mapa rodante disperso) — obstacle_memory.py ───────
 # El robot recuerda las latas vistas y las "arrastra" hacia sí mismo cuadro a
 # cuadro usando avance asumido (velocidad) + giro del IMU (anguloGyro del ESP32),

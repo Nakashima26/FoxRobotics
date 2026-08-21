@@ -300,8 +300,12 @@ class PPRuntime:
                         path_points = detect_centerline(bev_frame, bev_obstacles)
 
                         if len(path_points) >= C.MIN_PATH_PTS:
+                            lookahead_eff = self.controller.adaptive_lookahead(
+                                bev_obstacles, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
+                            )
                             steer_deg, lookahead_pt = self.controller.compute(
-                                path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
+                                path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y,
+                                lookahead_px=lookahead_eff,
                             )
                             pp_active = True
 

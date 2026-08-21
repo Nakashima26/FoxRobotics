@@ -1,15 +1,6 @@
 """
 Controlador geométrico Pure Pursuit operando en espacio de píxeles BEV.
-
-Fórmula:
-    alpha   = atan2(dx, dy)          # ángulo signed al punto look-ahead
-                                     # + = derecha,  - = izquierda
-    steer   = atan2(2·L·sin(alpha), lookahead_dist)   # en radianes
-    steer°  = degrees(steer)         # acotado a ±MAX_STEER_DEG
-
-Normalización para el protocolo serial V2:
-    obs = steer° / PP_STEER_GAIN     # ∈ [-1, 1]
-    ESP32 en modo pp=1 multiplica por ppSteerGain (35) para recuperar steer°.
+...
 """
 
 import math
@@ -24,14 +15,56 @@ class PurePursuitController:
     (Y decreciente = dirección de marcha).
     """
 
+    @staticmethod
+    def adaptive_lookahead(
+        bev_obstacles: list[tuple[float, float, str]],
+        robot_x: int = C.ROBOT_BEV_X,
+        robot_y: int = C.ROBOT_BEV_Y,
+    ) -> float:
+        """
+        Calcula el lookahead efectivo según qué tan cerca está el obstáculo
+        más próximo al robot.
+
+        Sin obstáculos, o con el más cercano lejos  -> LOOKAHEAD_MAX_PX
+        (trayectoria suave, estable en recta/curvas normales).
+
+        Con un obstáculo a <= LOOKAHEAD_OBS_NEAR_PX  -> LOOKAHEAD_MIN_PX
+        (apunta a un punto cercano del path -> geometría exige steer más
+        cerrado -> giro fuerte para esquivar de inmediato).
+
+        Entre ambos umbrales, interpola linealmente para que la transición
+        no sea un salto brusco de steer.
+        """
+        if not bev_obstacles:
+            return C.LOOKAHEAD_MAX_PX
+
+        nearest_d = min(
+            math.hypot(ox - robot_x, oy - robot_y) for ox, oy, _ in bev_obstacles
+        )
+
+        if nearest_d <= C.LOOKAHEAD_OBS_NEAR_PX:
+            return C.LOOKAHEAD_MIN_PX
+        if nearest_d >= C.LOOKAHEAD_OBS_FAR_PX:
+            return C.LOOKAHEAD_MAX_PX
+
+        t = (nearest_d - C.LOOKAHEAD_OBS_NEAR_PX) / (
+            C.LOOKAHEAD_OBS_FAR_PX - C.LOOKAHEAD_OBS_NEAR_PX
+        )
+        return C.LOOKAHEAD_MIN_PX + t * (C.LOOKAHEAD_MAX_PX - C.LOOKAHEAD_MIN_PX)
+
     def compute(
         self,
         path_points: list[tuple[int, int]],
         robot_x: int = C.ROBOT_BEV_X,
         robot_y: int = C.ROBOT_BEV_Y,
+        lookahead_px: float = C.LOOKAHEAD_PX,
     ) -> tuple[float, tuple[float, float]]:
         """
         Calcula el ángulo de dirección y el punto look-ahead.
+
+        lookahead_px: distancia look-ahead a usar ESTE frame. Pásale el valor
+        de adaptive_lookahead() para que se acorte cerca de obstáculos y así
+        el steer resultante sea geométricamente más cerrado.
 
         Retorna:
           steer_deg    : ángulos en grados, + = derecha, - = izquierda
@@ -40,20 +73,18 @@ class PurePursuitController:
         if not path_points:
             return 0.0, (float(robot_x), float(robot_y))
 
-        # Busca el primer punto a distancia >= LOOKAHEAD_PX
-        target = path_points[-1]   # fallback: el más lejano disponible (path_points[0] está detrás del robot)
+        target = path_points[-1]
         for pt in path_points:
             dist = math.hypot(pt[0] - robot_x, pt[1] - robot_y)
-            if dist >= C.LOOKAHEAD_PX:
+            if dist >= lookahead_px:
                 target = pt
                 break
 
-        dx = target[0] - robot_x   # positivo = derecha
-        dy = robot_y  - target[1]  # positivo = adelante (eje Y BEV invertido)
+        dx = target[0] - robot_x
+        dy = robot_y - target[1]
         ld = max(1.0, math.hypot(dx, dy))
 
-        # alpha: ángulo al objetivo respecto al eje de marcha del robot
-        alpha = math.atan2(dx, dy)   # + = derecha, - = izquierda
+        alpha = math.atan2(dx, dy)
 
         steer_rad = math.atan2(2.0 * C.WHEELBASE_PX * math.sin(alpha), ld)
         steer_deg = math.degrees(steer_rad)
@@ -62,8 +93,4 @@ class PurePursuitController:
         return steer_deg, (float(target[0]), float(target[1]))
 
     def normalize(self, steer_deg: float) -> float:
-        """
-        Normaliza steer_deg a [-1, 1] para el campo obs del protocolo V2.
-        El ESP32 en modo pp=1 recupera steer_deg multiplicando por PP_STEER_GAIN.
-        """
         return max(-1.0, min(1.0, steer_deg / C.PP_STEER_GAIN))
