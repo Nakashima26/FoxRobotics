@@ -279,6 +279,8 @@ void parsePiMessage(String line) {
     // su mapa rodante de obstáculos alineado al doblar (obstacle_memory.py).
     Serial2.print("ACK:V2,ang=");
     Serial2.println(anguloGyro, 2);
+    Serial2.print(",est=");
+    Serial2.println(estado == GIRANDO ? "G" : (estado == RECUPERANDO ? "R" : "S"));
     return;
   }
 

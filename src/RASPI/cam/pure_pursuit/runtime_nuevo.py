@@ -86,6 +86,15 @@ def _parse_heading(ack: str) -> float | None:
     except (ValueError, IndexError):
         return None
 
+def _parse_estado(ack: str) -> str | None:
+    if not ack:
+        return None
+    idx = ack.find("est=")
+    if idx < 0:
+        return None
+    val = ack[idx + 4: idx + 5]
+    return val if val in ("G", "R", "S") else None
+
 
 class PPRuntime:
     """
@@ -341,6 +350,17 @@ class PPRuntime:
                 serial_msg = self._build_serial_message(obs_norm, state, len(bev_obstacles))
                 self.serial_link.send_line(serial_msg)
                 serial_ack = self.serial_link.try_readline()
+
+                heading = _parse_heading(serial_ack)
+                if heading is not None:
+                    self._last_heading = heading
+
+                estado_now = _parse_estado(serial_ack)
+                if estado_now is not None:
+                    if estado_now == "S" and self._prev_estado in ("G", "R"):
+                        self.memory.reset()
+                        print("[MEM] Reset tras salir de giro/recuperación.", flush=True)
+                    self._prev_estado = estado_now
 
                 # Heading del IMU para el siguiente frame (ACK llega tras enviar)
                 heading = _parse_heading(serial_ack)

@@ -186,6 +186,7 @@ class ObstacleMemory:
 
         self._advance(ds_px, dheading)
         self._merge(new_obs)
+        self._dedupe()
         self._prune()
 
         return [(o.x, o.y, o.color) for o in self._obs]
