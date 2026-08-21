@@ -118,9 +118,9 @@ OBS_BIAS_SHIFT = 28    # desplazamiento lateral para sesgo de color WRO (px)
 
 # ─── Escala única de urgencia por distancia (mm reales) ──────────────────────
 # A esta distancia (o menos) del obstáculo: máxima agresividad de esquiva.
-OBSTACLE_URGENT_MM = 220.0   # ≈22cm
+OBSTACLE_URGENT_MM = 150.0   # 
 # A esta distancia (o más): comportamiento normal/suave, sin urgencia.
-OBSTACLE_CASUAL_MM = 500.0   # ≈50cm
+OBSTACLE_CASUAL_MM = 300.0   # 
 
 # ─── Pure Pursuit ─────────────────────────────────────────────────────────────
 LOOKAHEAD_PX   = 100.0    # distancia look-ahead en px BEV  (= 160 mm)
