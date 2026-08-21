@@ -121,9 +121,7 @@ def _pass_side_cx(row_mask: np.ndarray, safe_row_mask: np.ndarray, ox: float, co
     return None
 
 
-def _smooth_x(points: list[tuple[float, int]], weights: list[float] | None = None) -> list[tuple[float, int]]:
-    """Media móvil corta en X — NO suaviza filas con esquiva activa (weight alto),
-    para no aplanar el pico de offset justo donde más importa."""
+def _smooth_x(points, weights=None):
     n = len(points)
     win = int(C.CENTERLINE_SMOOTH_WIN)
     if n < 3 or win < 3:
@@ -131,16 +129,17 @@ def _smooth_x(points: list[tuple[float, int]], weights: list[float] | None = Non
     if win % 2 == 0:
         win += 1
     xs = np.array([p[0] for p in points], dtype=np.float64)
-    kernel = np.ones(win, dtype=np.float64) / win
+    kernel = np.ones(win) / win
     pad = win // 2
     padded = np.pad(xs, pad, mode="edge")
     xs_s = np.convolve(padded, kernel, mode="valid")
 
     if weights is not None:
-        w_thresh = 0.05
+        # Blend: en peso alto confía más en el valor crudo, pero sin
+        # abandonar el suavizado del todo (evita que ruido puntual dispare el steer).
         for i, wgt in enumerate(weights):
-            if wgt > w_thresh:
-                xs_s[i] = xs[i]   # zona de esquiva: usar el valor crudo, sin promediar
+            blend = min(1.0, wgt) * 0.7   # máximo 70% crudo, nunca 100%
+            xs_s[i] = (1.0 - blend) * xs_s[i] + blend * xs[i]
 
     return [(float(xs_s[i]), points[i][1]) for i in range(n)]
 

@@ -64,17 +64,26 @@ class PurePursuitController:
             return 0.0, (float(robot_x), float(robot_y))
 
         if bev_obstacles:
-            lo, hi = lookahead_px * 0.5, lookahead_px * 1.8
+            # Ventana angosta alrededor del lookahead real — solo evita caer
+            # exactamente en un punto de transición, no busca el offset máximo global.
+            lo, hi = lookahead_px * 0.85, lookahead_px * 1.25
             candidates = [
                 pt for pt in path_points
                 if lo <= math.hypot(pt[0] - robot_x, pt[1] - robot_y) <= hi
-            ] or path_points
-            target = max(candidates, key=lambda pt: abs(pt[0] - robot_x))
+            ]
+            if candidates:
+                target = max(candidates, key=lambda pt: abs(pt[0] - robot_x))
+            else:
+                # fallback al comportamiento original si no hay candidatos en rango
+                target = path_points[-1]
+                for pt in path_points:
+                    if math.hypot(pt[0] - robot_x, pt[1] - robot_y) >= lookahead_px:
+                        target = pt
+                        break
         else:
             target = path_points[-1]
             for pt in path_points:
-                dist = math.hypot(pt[0] - robot_x, pt[1] - robot_y)
-                if dist >= lookahead_px:
+                if math.hypot(pt[0] - robot_x, pt[1] - robot_y) >= lookahead_px:
                     target = pt
                     break
 
