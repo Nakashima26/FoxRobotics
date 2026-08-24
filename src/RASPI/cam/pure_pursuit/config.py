@@ -107,9 +107,9 @@ CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-mues
 
 # ─── Manejo de obstáculos en BEV ─────────────────────────────────────────────
 # Tamaño físico real de los obstáculos (latas de refresco WRO ≈ 65 mm diámetro)
-OBS_REAL_DIAMETER_MM = 65.0
+OBS_REAL_DIAMETER_MM = 75.0
 OBS_PHYSICAL_R_PX    = round(OBS_REAL_DIAMETER_MM / 2.0 / MM_PER_PX)  # ≈ 16 px
-OBS_SAFETY_R_PX      = 19    # margen de seguridad adicional (px)
+OBS_SAFETY_R_PX      = 20    # margen de seguridad adicional (px)
 OBS_INFLATE_R        = OBS_PHYSICAL_R_PX + OBS_SAFETY_R_PX             # ≈ 35 px
 
 OBS_BIAS_SHIFT = 28    # desplazamiento lateral para sesgo de color WRO (px)

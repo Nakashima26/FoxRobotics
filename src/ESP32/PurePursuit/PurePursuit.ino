@@ -162,7 +162,7 @@ void escribirServo(int angulo) {
 }
 
 void setMotor(int velocidad) {
-  velocidad = constrain(velocidad, 0, 100);
+  velocidad = constrain(velocidad, 0, 80);
   ledcWrite(PWMA, velocidad);
 }
 
