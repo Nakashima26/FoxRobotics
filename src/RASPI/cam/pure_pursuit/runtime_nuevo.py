@@ -143,10 +143,10 @@ class PPRuntime:
 
     # ── Serial ────────────────────────────────────────────────────────────────
 
-    def _build_serial_message(self, obs_norm: float, state: str, n_mem_obs: int) -> str:
+    def _build_serial_message(self, obs_norm: float, state: str, n_mem_obs: int, pasado: bool) -> str:
         has_obstacle = n_mem_obs > 0   # basado en memoria real, no en steer
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
-                f"state={state},prio={int(has_obstacle)},mem={n_mem_obs},pp=1")
+                f"state={state},prio={int(has_obstacle)},mem={n_mem_obs},pp=1,pasado={int(pasado)}")
 
     # ── Captura ───────────────────────────────────────────────────────────────
 
@@ -280,6 +280,7 @@ class PPRuntime:
                 bev_frame     = None
                 bev_obstacles = []
                 pp_active     = False
+                pasado        = False
 
                 if self.bev.is_calibrated:
                     try:
@@ -308,6 +309,10 @@ class PPRuntime:
                             bev_obstacles = self.memory.update(
                                 new_obstacles, dt_s, self._last_heading
                             )
+                            # Evento de un solo frame: un obstáculo quedó detrás
+                            # del robot recién en este update -> "ya lo pasé de
+                            # verdad", no "dejé de verlo". Dispara RECUPERANDO.
+                            pasado = self.memory.last_passed
 
                         # Detectar centerline (con obstáculos recordados+nuevos)
                         path_points = detect_centerline(bev_frame, bev_obstacles)
@@ -351,7 +356,7 @@ class PPRuntime:
                 state = "pp_follow" if pp_active else "no_path"
 
                 # ── Construir y enviar mensaje serial ────────────────────────
-                serial_msg = self._build_serial_message(obs_norm, state, len(bev_obstacles))
+                serial_msg = self._build_serial_message(obs_norm, state, len(bev_obstacles), pasado)
                 self.serial_link.send_line(serial_msg)
                 serial_ack = self.serial_link.try_readline()
 

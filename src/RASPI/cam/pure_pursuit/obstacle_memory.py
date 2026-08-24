@@ -53,10 +53,12 @@ class ObstacleMemory:
         self.ry = robot_y
         self._obs: list[_Obs] = []
         self._prev_heading: float | None = None
+        self.last_passed: bool = False   # ver _prune() / update()
 
     def reset(self):
         self._obs.clear()
         self._prev_heading = None
+        self.last_passed = False
 
     # ── Transformación por movimiento del robot ─────────────────────────────────
 
@@ -147,18 +149,30 @@ class ObstacleMemory:
 
     # ── Poda ────────────────────────────────────────────────────────────────────
 
-    def _prune(self):
+    def _prune(self) -> bool:
+        """
+        Poda obstáculos vencidos.  Distingue POR QUÉ sale cada uno, porque
+        "perdí la confianza" (decay) y "quedó detrás del robot" (lo rebasé
+        físicamente) no son el mismo evento — solo el segundo debe disparar
+        RECUPERANDO en el ESP32 (ver runtime_nuevo.py / PurePursuit.ino).
+
+        Retorna True si en esta llamada algún obstáculo se descartó
+        específicamente por quedar detrás del robot ("evento pasado").
+        """
         behind_y = self.ry + C.OBS_MEM_BEHIND_PAD
         kept: list[_Obs] = []
+        passed = False
         for o in self._obs:
             if o.conf < C.OBS_MEM_MIN_CONF:
-                continue
+                continue                             # perdido de vista, no rebasado
             if o.y > behind_y:                       # ya quedó detrás del robot
+                passed = True
                 continue
             if not (0.0 <= o.x < C.BEV_W and 0.0 <= o.y < C.BEV_H):
                 continue
             kept.append(o)
         self._obs = kept
+        return passed
 
     # ── API ─────────────────────────────────────────────────────────────────────
 
@@ -187,6 +201,6 @@ class ObstacleMemory:
         self._advance(ds_px, dheading)
         self._merge(new_obs)
         self._dedupe()
-        self._prune()
+        self.last_passed = self._prune()
 
         return [(o.x, o.y, o.color) for o in self._obs]

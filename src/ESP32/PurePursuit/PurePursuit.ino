@@ -81,6 +81,9 @@ int   turnHint     = 0;       // turn {-1, 0, +1}
 bool  piPriority   = false;   // prio=1: obstáculo activo en Pi
 int   piMemoryFrames = 0;     // mem=N: frames de memoria restantes
 bool  piPurePursuit = false;  // pp=1: Pi en modo Pure Pursuit
+bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
+                               // FÍSICAMENTE detrás del robot este frame (no que
+                               // simplemente dejó de verlo) — dispara RECUPERANDO.
 bool  piReady      = false;
 
 unsigned long lastPiMsgMs = 0;
@@ -106,14 +109,15 @@ unsigned long bootStartMs = 0;
 const unsigned long BOOT_WAIT_PI_MS = 1000;
 
 // ── FSM estados ───────────────────────────────────────────────────────────────
-// RECUPERANDO: la cámara ACABA de dejar de ver un obstáculo (prio 1→0). En vez
-// de que Pure Pursuit intente enderezar solo con lo que ve (lento, impreciso),
-// aquí el wall PID + gyro PID (que YA se calculan siempre, ver controlPID())
-// toman el volante hasta que el robot vuelve a estar centrado/alineado.
+// RECUPERANDO: la Pi confirma (piPasado=1) que el robot YA atravesó
+// físicamente un obstáculo — no que la cámara simplemente dejó de verlo
+// (perder de vista ≠ haber rebasado). En vez de que Pure Pursuit intente
+// enderezar solo con lo que ve en ese instante incierto, aquí el wall PID +
+// gyro PID (que YA se calculan siempre, ver controlPID()) toman el volante
+// hasta que el robot vuelve a estar centrado/alineado.
 enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO };
 Estado estado = SIGUIENDO;
 
-bool  prioAnterior = false;     // para detectar el flanco de bajada prio 1→0
 const float wallSettleCm    = 8.0;   // |distL-distR| por debajo de esto = "centrado"
 const float headingSettleDeg = 8.0;  // |errorGyro| por debajo de esto = "alineado"
 
@@ -271,6 +275,17 @@ void parsePiMessage(String line) {
       piPurePursuit = (s.toInt() != 0);
     } else {
       piPurePursuit = false;   // mensaje V1 sin campo pp → modo obstáculo
+    }
+
+    // pasado — evento de un solo frame: el robot ya atravesó físicamente el
+    // obstáculo. Ausente en V1 → false por defecto.
+    idx = line.indexOf("pasado=");
+    if (idx >= 0) {
+      int end = line.indexOf(',', idx);
+      String s = (end >= 0) ? line.substring(idx + 7, end) : line.substring(idx + 7);
+      piPasado = (s.toInt() != 0);
+    } else {
+      piPasado = false;
     }
 
     piReady     = true;
@@ -528,20 +543,18 @@ void loop() {
     case SIGUIENDO: {
       velocidadMotor = 180;
 
-      // Flanco de bajada: la cámara ACABA de dejar de ver el obstáculo.
-      // Entrar a RECUPERANDO en vez de confiar en que Pure Pursuit se
-      // enderece solo con lo que ve en ese instante incierto.
-      if (prioAnterior && !piPriority) {
+      // La Pi confirma que el robot ya atravesó físicamente el obstáculo
+      // (evento de un solo frame) -> entrar a RECUPERANDO. Ya no depende de
+      // que la cámara simplemente haya dejado de verlo.
+      if (piPasado) {
         estado = RECUPERANDO;
         recuperandoEntryMs = millis();
         integralWall  = 0; prevErrorWall  = 0;
         integralGyro  = 0; prevErrorGyro  = 0;
 
-        prioAnterior = piPriority;
         controlPID(distL, distR);   // ya toma el branch RECUPERANDO (estado ya cambió)
         break;
       }
-      prioAnterior = piPriority;
 
       controlPID(distL, distR);
 
@@ -589,7 +602,6 @@ void loop() {
         // de una esquina real, donde un lado lee "sin pared" legítimamente).
         estado = SIGUIENDO;
       }
-      prioAnterior = piPriority;
       break;
     }
 
