@@ -110,14 +110,14 @@ class PPRuntime:
         self.bev        = BEVTransformer(cfg.calib_path)
         self.controller = PurePursuitController()
         self.memory     = ObstacleMemory()
-        self.controller = PurePursuitController()
-        self.memory     = ObstacleMemory()
         self.far_hint   = FarHintManager()
-        
+
         # Estado de la memoria rodante
         self._last_heading: float | None = None
         self._last_update_t: float | None = None
-        self._prev_estado: str | None = None 
+        self._prev_estado: str | None = None
+        self._is_turning: bool = False
+        self._turn_start_t: float | None = None
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
@@ -300,11 +300,14 @@ class PPRuntime:
                                     # cam_to_bev falló) → tratar como lejano
                                     far_objects.append((x + w / 2.0, w, h, color_name))
 
-                        # ── Memoria rodante: fusiona lo nuevo con lo recordado ──
+                        # ── Memoria rodante: apagada durante el giro para evitar fantasmas ──
                         # (Solo con obstáculos BEV reales — el far_hint NO entra aquí)
-                        bev_obstacles = self.memory.update(
-                            new_obstacles, dt_s, self._last_heading
-                        )
+                        if self._is_turning:
+                            bev_obstacles = []
+                        else:
+                            bev_obstacles = self.memory.update(
+                                new_obstacles, dt_s, self._last_heading
+                            )
 
                         # Detectar centerline (con obstáculos recordados+nuevos)
                         path_points = detect_centerline(bev_frame, bev_obstacles)
@@ -358,15 +361,25 @@ class PPRuntime:
 
                 estado_now = _parse_estado(serial_ack)
                 if estado_now is not None:
-                    if estado_now == "S" and self._prev_estado in ("G", "R"):
+                    if estado_now == "G" and self._prev_estado != "G":
+                        # Empieza el giro físico -> vaciar YA y apagar la memoria.
                         self.memory.reset()
-                        print("[MEM] Reset tras salir de giro/recuperación.", flush=True)
+                        self._is_turning   = True
+                        self._turn_start_t = now
+                        print("[MEM] Giro detectado — memoria de obstáculos desactivada.", flush=True)
+                    elif estado_now != "G" and self._is_turning:
+                        # Terminó el giro -> la memoria ya está vacía (no se tocó), arranca
+                        # limpia con las detecciones frescas de este frame.
+                        self._is_turning = False
+                        print("[MEM] Giro terminado — memoria de obstáculos reactivada.", flush=True)
                     self._prev_estado = estado_now
 
-                # Heading del IMU para el siguiente frame (ACK llega tras enviar)
-                heading = _parse_heading(serial_ack)
-                if heading is not None:
-                    self._last_heading = heading
+                # Red de seguridad: si por un ACK perdido/atorado el ESP32 nunca
+                # reporta salir de "G", no dejar la memoria apagada para siempre.
+                if (self._is_turning and self._turn_start_t is not None
+                        and (now - self._turn_start_t) > C.TURN_TIMEOUT_S):
+                    self._is_turning = False
+                    print("[MEM] Timeout de giro — memoria de obstáculos reactivada por seguridad.", flush=True)
 
                 log_line = f"TX: {serial_msg}"
                 if serial_ack:

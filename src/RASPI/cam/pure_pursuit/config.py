@@ -154,7 +154,13 @@ OBS_MEM_MIN_CONF   = 0.4    # por debajo de esto el obstáculo recordado se desc
 OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
 OBS_MEM_BEHIND_PAD = 10      # px: tirar el obstáculo cuando queda detrás del robot (bev_y > robot_y + pad)
 OBS_MEM_MAX        = 12      # tope de obstáculos recordados (seguridad)
-OBS_MEM_DEDUPE_PX  = 40.0 
+OBS_MEM_DEDUPE_PX  = 40.0
+
+# Red de seguridad para runtime_nuevo.py: si el ESP32 se queda atorado
+# reportando est=G (ack perdido, giro real que nunca termina, etc.), no
+# dejar la memoria de obstáculos apagada para siempre — un giro real dura
+# bastante menos que esto.
+TURN_TIMEOUT_S = 3.0
 
 # ─── Hint direccional (obstáculo lejano, fuera de rango BEV) ─────────────────
 # Un objeto rojo/verde detectado en la imagen de cámara CRUDA (no en BEV) que
