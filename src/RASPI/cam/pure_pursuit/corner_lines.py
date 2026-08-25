@@ -248,7 +248,9 @@ class TurnDirectionTracker:
             return self.direction
         guess = infer_turn_dir_from_ultrasonics(dL, dR)
         if guess is None:
-            return self.direction
+            self._candidate = None
+            self._candidate_count = 0
+            return None
         return self._commit_guess(guess)
 
     def _commit_guess(self, guess: str) -> str | None:

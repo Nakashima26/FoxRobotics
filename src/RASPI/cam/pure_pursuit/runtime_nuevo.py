@@ -157,7 +157,6 @@ def _bias_scale_for_preturn(
     colors = {c for _, _, c in bev_obstacles} | {c for *_, c in far_objects}
     has_red = "Red" in colors
     has_green = "Green" in colors
-    has_bev = len(bev_obstacles) > 0
 
     near_open = ack.corner
     if ack.dL is not None and ack.dL >= C.PRE_TURN_OPEN_CM:
@@ -175,23 +174,16 @@ def _bias_scale_for_preturn(
     if has_green and (hug_left or opening_left):
         scale = C.NEAR_CORNER_BIAS_SCALE if (near_open or opening_left) else C.HUG_BIAS_SCALE
         reason = "corner_G" if opening_left else "hug_L"
-        if has_bev:
-            scale = max(scale, C.MIN_BIAS_SCALE_WITH_OBS)
         return scale, True, reason
 
     # Rojo → pasar por la DERECHA. Peligro si abrazas pared der. o abre derecha.
     if has_red and (hug_right or opening_right):
         scale = C.NEAR_CORNER_BIAS_SCALE if (near_open or opening_right) else C.HUG_BIAS_SCALE
         reason = "corner_R" if opening_right else "hug_R"
-        if has_bev:
-            scale = max(scale, C.MIN_BIAS_SCALE_WITH_OBS)
         return scale, True, reason
 
     if near_open and (has_red or has_green):
-        scale = C.NEAR_CORNER_BIAS_SCALE
-        if has_bev:
-            scale = max(scale, C.MIN_BIAS_SCALE_WITH_OBS)
-        return scale, True, "corner"
+        return C.NEAR_CORNER_BIAS_SCALE, True, "corner"
     return 1.0, False, "ok"
 
 
@@ -224,7 +216,6 @@ class PPRuntime:
         self._bias_scale = 1.0
         self._preturn_reason = "ok"
         self._esp_fw_logged = False
-        self._turn_block_hold = 0
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
@@ -545,15 +536,8 @@ class PPRuntime:
                 # Sin línea válida → recto (obs=0).
                 state = "pp_follow" if pp_active else "no_path"
 
-                # Bloquear giro si hay lata en BEV; se sostiene unos frames tras
-                # perderla (latch) para no soltar el giro justo cuando la lata se
-                # cae del BEV o se marca pasado. Solo intr=1 libera de inmediato.
-                has_obs = len(bev_obstacles) > 0
-                if has_obs and not interior:
-                    self._turn_block_hold = C.TURN_BLOCK_HOLD_FRAMES
-                block_turn = (has_obs or self._turn_block_hold > 0) and not interior
-                if self._turn_block_hold > 0:
-                    self._turn_block_hold -= 1
+                # Bloquear giro si hay lata en BEV; solo intr=1 libera en ESP32.
+                block_turn = len(bev_obstacles) > 0 and not interior
                 mem_report = len(bev_obstacles)
 
                 # ── Construir y enviar mensaje serial ────────────────────────
