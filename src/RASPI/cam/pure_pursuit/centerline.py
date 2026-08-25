@@ -360,9 +360,10 @@ def draw_bev_debug(
       - Posición del robot con flecha de heading
       - Círculo del radio look-ahead
       - Texto de estado
-      - Líneas de esquina (line_info, ver corner_lines.detect_lines()) — una
-        barra horizontal completa por color en su Y detectada, tal como se
-        ve en corner_lines.py/config.LINE_*.
+      - Líneas de esquina (line_info, ver corner_lines.py) — si se pudo
+        ajustar una recta con pendiente (OrangeLineTracker.classify()), se
+        dibuja INCLINADA tal cual; si no (línea muy ocluida/corta para
+        ajustar), cae de vuelta a una barra horizontal plana en near_y.
     """
     out = bev_bgr.copy()
 
@@ -371,10 +372,18 @@ def draw_bev_debug(
         h, w = out.shape[:2]
         y_txt = 58
         for color, col_bgr in (("Orange", (0, 140, 255)),):
-            info = line_info.get(color, {"seen": False, "near_y": None})
+            info = line_info.get(color, {"seen": False, "near_y": None, "line": None})
             if info["seen"]:
                 ny = int(info["near_y"])
-                cv2.line(out, (0, ny), (w, ny), col_bgr, 2)          # dónde está la línea
+                line = info.get("line")
+                if line is not None and abs(line[0]) > 1e-3:
+                    vx, vy, x0, y0 = line
+                    slope = vy / vx
+                    y_left  = int(round(y0 + (0     - x0) * slope))
+                    y_right = int(round(y0 + (w - 1 - x0) * slope))
+                    cv2.line(out, (0, y_left), (w - 1, y_right), col_bgr, 2)
+                else:
+                    cv2.line(out, (0, ny), (w, ny), col_bgr, 2)   # fallback plano
                 close = (C.ROBOT_BEV_Y - ny) <= C.LINE_PROXIMITY_PX
                 txt = f"{color}: y={ny}" + ("  CERCA" if close else "")
             else:
