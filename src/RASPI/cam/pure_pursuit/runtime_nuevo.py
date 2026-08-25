@@ -42,10 +42,7 @@ from wro_runtime import (
 )
 
 from .bev import BEVTransformer
-from .centerline import (
-    detect_centerline, map_obstacle_to_bev, draw_bev_debug,
-    detect_corner_line_y, corner_line_debug_candidates,
-)
+from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug, detect_corner_line_y
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
@@ -285,7 +282,6 @@ class PPRuntime:
                 bev_obstacles = []
                 bev_obstacles_other = []
                 corner_line_y = None
-                corner_candidates = []
                 pp_active     = False
                 pasado        = False
 
@@ -313,8 +309,7 @@ class PPRuntime:
                         if self._is_turning:
                             bev_obstacles = []
                         else:
-                            corner_line_y     = detect_corner_line_y(bev_frame)
-                            corner_candidates = corner_line_debug_candidates(bev_frame)
+                            corner_line_y = detect_corner_line_y(bev_frame)
                             merged = self.memory.update(
                                 new_obstacles, dt_s, self._last_heading, corner_line_y
                             )
@@ -406,19 +401,6 @@ class PPRuntime:
                     log_line += f" | RX: {serial_ack}"
                 print(log_line, flush=True)
 
-                # ── DIAGNÓSTICO TEMPORAL: dump de los blobs candidatos a línea
-                # de esquina — quitar junto con el dibujo de arriba una vez
-                # calibrados los umbrales CORNER_LINE_* en config.py.
-                if corner_candidates:
-                    parts = []
-                    for c in corner_candidates:
-                        estado = "OK" if c["ok"] else "RECHAZADO:" + ",".join(c["reasons"])
-                        rot = (f"rot=({c['rot_w']:.0f},{c['rot_h']:.0f})"
-                               if c["rot_w"] is not None else "rot=n/a")
-                        parts.append(f"[{c['source']} bbox={c['w']}x{c['h']} area={c['area']} "
-                                     f"cy={c['cy']:.0f} {rot} {estado}]")
-                    print(f"[LINEA] corner_y={corner_line_y} " + " ".join(parts), flush=True)
-
                 
                 # ── Display ──────────────────────────────────────────────────
                 self._annotate(processed_frame, steer_deg, obs_norm,
@@ -432,20 +414,6 @@ class PPRuntime:
                         corner_line_y=corner_line_y,
                         bev_obstacles_other=bev_obstacles_other,
                     )
-
-                    # ── DIAGNÓSTICO TEMPORAL: dibuja todos los blobs candidatos
-                    # a línea de esquina (naranja/azul), pasen o no el filtro de
-                    # forma — verde=OK, rojo=rechazado (bw x bh al lado). Quitar
-                    # una vez calibrados CORNER_LINE_MIN_WIDTH_PX/MAX_HEIGHT_PX/
-                    # MIN_AREA_PX en config.py.
-                    for c in corner_candidates:
-                        col = (0, 220, 0) if c["ok"] else (0, 0, 255)
-                        cv2.rectangle(bev_debug, (c["x"], c["y"]),
-                                      (c["x"] + c["w"], c["y"] + c["h"]), col, 1)
-                        cv2.putText(bev_debug, f"{c['w']}x{c['h']}",
-                                    (c["x"], max(10, c["y"] - 3)),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, col, 1)
-
                     bev_h = processed_frame.shape[0]
                     bev_small = cv2.resize(bev_debug, (bev_h, bev_h))
                     combined = np.hstack([processed_frame, bev_small])
