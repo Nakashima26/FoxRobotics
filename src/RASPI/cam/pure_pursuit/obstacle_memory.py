@@ -28,17 +28,13 @@ from . import config as C
 
 
 class _Obs:
-    __slots__ = ("x", "y", "color", "conf", "same_straight")
+    __slots__ = ("x", "y", "color", "conf")
 
     def __init__(self, x: float, y: float, color: str, conf: float):
         self.x = x
         self.y = y
         self.color = color
         self.conf = conf
-        # Default True: sin línea de esquina detectada todavía, se asume que
-        # el obstáculo está en la recta actual (comportamiento previo a la
-        # clasificación, ver _classify()).
-        self.same_straight = True
 
 
 class ObstacleMemory:
@@ -151,29 +147,6 @@ class ObstacleMemory:
 
         self._obs = kept
 
-    # ── Clasificación "mi recta" vs. "siguiente recta" ───────────────────────────
-
-    def _classify(self, corner_line_y: float | None):
-        """
-        Etiqueta cada obstáculo recordado según su Y (ya actualizada por
-        _advance/_merge) quede antes o después de la línea de esquina más
-        cercana detectada este frame (ver centerline.detect_corner_line_y()).
-
-        Convención BEV: Y crece hacia el robot (mirar OBS_MEM_BEHIND_PAD /
-        _prune). Un obstáculo con Y > corner_line_y está entre el robot y la
-        línea → mi recta. Y < corner_line_y quedó del otro lado → visto a
-        través del hueco de la curva, pertenece a la siguiente recta.
-
-        Si este frame no se detectó ninguna línea, se deja la última
-        clasificación conocida de cada obstáculo (por defecto True al
-        crearse) — así no cambia el comportamiento actual cuando no hay
-        línea visible.
-        """
-        if corner_line_y is None:
-            return
-        for o in self._obs:
-            o.same_straight = o.y > corner_line_y
-
     # ── Poda ────────────────────────────────────────────────────────────────────
 
     def _prune(self) -> bool:
@@ -206,20 +179,15 @@ class ObstacleMemory:
     def update(self,
                new_obs: list[tuple[float, float, str]],
                dt_s: float,
-               heading_deg: float | None,
-               corner_line_y: float | None = None,
-               ) -> list[tuple[float, float, str, bool]]:
+               heading_deg: float | None
+               ) -> list[tuple[float, float, str]]:
         """
         Avanza el mapa, fusiona detecciones nuevas y devuelve la lista combinada
-        (x, y, color, same_straight) lista para separar en runtime_nuevo.py
-        antes de pasarla a detect_centerline().
+        (x, y, color) lista para detect_centerline().
 
-        new_obs       : obstáculos detectados este frame en coords BEV
-        dt_s          : segundos transcurridos desde el update anterior
-        heading_deg   : ángulo del IMU (anguloGyro del ESP32) o None si no llegó
-        corner_line_y : Y en BEV de la línea de esquina detectada este frame
-                        (centerline.detect_corner_line_y()), o None si no se
-                        vio ninguna — ver _classify().
+        new_obs     : obstáculos detectados este frame en coords BEV
+        dt_s        : segundos transcurridos desde el update anterior
+        heading_deg : ángulo del IMU (anguloGyro del ESP32) o None si no llegó
         """
         ds_px = (C.ROBOT_SPEED_MMS * dt_s) / C.MM_PER_PX if dt_s > 0 else 0.0
 
@@ -233,7 +201,6 @@ class ObstacleMemory:
         self._advance(ds_px, dheading)
         self._merge(new_obs)
         self._dedupe()
-        self._classify(corner_line_y)
         self.last_passed = self._prune()
 
-        return [(o.x, o.y, o.color, o.same_straight) for o in self._obs]
+        return [(o.x, o.y, o.color) for o in self._obs]

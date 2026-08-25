@@ -388,11 +388,7 @@ def run(args):
         new_obs = obstacles_to_bev(robot_x, robot_y, heading)
 
         if memory is not None:
-            # ObstacleMemory.update() ahora también clasifica "mi recta" vs.
-            # "siguiente recta" (4to elemento) — este simulador no genera
-            # línea de esquina sintética, así que se descarta el flag y se
-            # usan todos los obstáculos como antes (sin línea → todo True).
-            bev_obstacles = [(x, y, c) for x, y, c, _same in memory.update(new_obs, dt, heading)]
+            bev_obstacles = memory.update(new_obs, dt, heading)
         else:
             bev_obstacles = new_obs
 

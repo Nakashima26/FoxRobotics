@@ -26,7 +26,7 @@ if _CAM_DIR not in sys.path:
 
 from vision import Vision
 from .bev        import BEVTransformer
-from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug, detect_corner_line_y
+from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
 from .controller import PurePursuitController
 from . import config as C
 
@@ -105,8 +105,7 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
                     if result is not None:
                         bev_obstacles.append((result[0], result[1], color_name))
 
-            path_points   = detect_centerline(bev_frame, bev_obstacles)
-            corner_line_y = detect_corner_line_y(bev_frame)
+            path_points = detect_centerline(bev_frame, bev_obstacles)
         except Exception as e:
             import traceback
             print(f"[ERROR] {e}", flush=True)
@@ -123,29 +122,17 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
             )
             pp_active = True
 
-        # ── Clasificación visual "mi recta" vs "siguiente recta" ───────────────
-        # Solo para depurar detect_corner_line_y() en capturas reales — este
-        # test no tiene ObstacleMemory, no cambia el steer/dodge mostrado.
-        if corner_line_y is not None:
-            bev_obstacles_same  = [o for o in bev_obstacles if o[1] > corner_line_y]
-            bev_obstacles_other = [o for o in bev_obstacles if o[1] <= corner_line_y]
-        else:
-            bev_obstacles_same, bev_obstacles_other = bev_obstacles, []
-
         # ── Dibujar BEV debug ─────────────────────────────────────────────────
         bev_debug = draw_bev_debug(
             bev_frame, path_points, lookahead_pt,
-            bev_obstacles_same, steer_deg, pp_active,
-            corner_line_y=corner_line_y,
-            bev_obstacles_other=bev_obstacles_other,
+            bev_obstacles, steer_deg, pp_active,
         )
 
         # ── Overlay en frame de cámara ────────────────────────────────────────
         lines = [
             f"fps={fps:.1f}  pp={'ON' if pp_active else 'OFF'}  pts={len(path_points)}",
             f"steer={steer_deg:+.1f} deg",
-            f"obs_R={len(positions.get('Red',[]))}  obs_G={len(positions.get('Green',[]))}  "
-            f"same={len(bev_obstacles_same)}  other={len(bev_obstacles_other)}",
+            f"obs_R={len(positions.get('Red',[]))}  obs_G={len(positions.get('Green',[]))}",
         ]
         y_txt = 22
         for txt in lines:
