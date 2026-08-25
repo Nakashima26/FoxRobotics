@@ -321,6 +321,28 @@ class PPRuntime:
                         # giro ni clasifica obstáculos (eso viene después).
                         lines_info = detect_orange_blue_lines(bev_frame)
 
+                        # ── DIAGNÓSTICO TEMPORAL: HSV real de la línea naranja +
+                        # de la banda justo debajo (donde se ve la azul en cámara).
+                        # Números de verdad para calibrar FLOOR_LOWER/UPPER_BLUE_WIDE
+                        # en vez de adivinar sobre un screenshot comprimido.
+                        hsv_dbg = cv2.cvtColor(bev_frame, cv2.COLOR_BGR2HSV)
+                        if cv2.countNonZero(lines_info["orange_mask"]) > 0:
+                            m = lines_info["orange_mask"] > 0
+                            h_, s_, v_ = hsv_dbg[..., 0][m], hsv_dbg[..., 1][m], hsv_dbg[..., 2][m]
+                            print(f"[HSV naranja] H={int(h_.min())}-{int(h_.max())} "
+                                  f"S={int(s_.min())}-{int(s_.max())} "
+                                  f"V={int(v_.min())}-{int(v_.max())}", flush=True)
+
+                            oy = int(lines_info["orange_y"])
+                            y0, y1 = oy + 3, min(bev_frame.shape[0], oy + 50)
+                            band = hsv_dbg[y0:y1, :, :]
+                            hb, sb, vb = band[..., 0], band[..., 1], band[..., 2]
+                            print(f"[HSV banda debajo de naranja y={y0}-{y1}] "
+                                  f"H min/mean/max={int(hb.min())}/{hb.mean():.0f}/{int(hb.max())} "
+                                  f"S min/mean/max={int(sb.min())}/{sb.mean():.0f}/{int(sb.max())} "
+                                  f"V min/mean/max={int(vb.min())}/{vb.mean():.0f}/{int(vb.max())}",
+                                  flush=True)
+
                         # Detectar centerline (con obstáculos recordados+nuevos)
                         path_points = detect_centerline(bev_frame, bev_obstacles)
 
