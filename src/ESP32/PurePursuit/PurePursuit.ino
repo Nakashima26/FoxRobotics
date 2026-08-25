@@ -324,7 +324,8 @@ void parsePiMessage(String line) {
     Serial2.print(",dL=");
     Serial2.print((int)distL_filtrada);
     Serial2.print(",dR=");
-    Serial2.println((int)distR_filtrada);
+    Serial2.print((int)distR_filtrada);
+    Serial2.println(",fw=turnblk1");
     return;
   }
 
@@ -474,6 +475,7 @@ void controlPID(long distL, long distR) {
 void setup() {
   Serial.begin(115200);
   Serial2.begin(115200, SERIAL_8N1, 17, 16);   // RX=17, TX=16 → Raspberry Pi
+  Serial.println("FW=turnblk1 prio-block (no aperturaEsquina bypass)");
 
   Wire.begin();
   mpu.begin();

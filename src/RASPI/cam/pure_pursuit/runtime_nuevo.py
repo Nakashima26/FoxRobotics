@@ -80,6 +80,11 @@ class PPConfig:
 
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Tag que el ESP32 pone en ACK:V2 (,fw=turnblk1) si corre el firmware
+# con bloqueo de giro por prio (sin bypass aperturaEsquina).
+ESP_FW_TURNBLK = "turnblk1"
+
+
 @dataclass
 class EspAck:
     """Campos del ACK:V2 del ESP32 (heading + señales de pre-giro)."""
@@ -89,6 +94,7 @@ class EspAck:
     corner: bool = False
     dL: float | None = None
     dR: float | None = None
+    fw: str | None = None
 
 
 def _parse_ack_field(ack: str, key: str) -> str | None:
@@ -132,6 +138,9 @@ def _parse_ack(ack: str) -> EspAck:
                 setattr(out, attr, float(s))
             except ValueError:
                 pass
+    fw_s = _parse_ack_field(ack, "fw")
+    if fw_s is not None:
+        out.fw = fw_s.split()[0]
     return out
 
 
@@ -206,6 +215,7 @@ class PPRuntime:
         self._last_ack = EspAck()
         self._bias_scale = 1.0
         self._preturn_reason = "ok"
+        self._esp_fw_logged = False
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
@@ -542,6 +552,17 @@ class PPRuntime:
                 self._last_ack = ack
                 if ack.ang is not None:
                     self._last_heading = ack.ang
+                if serial_ack and not self._esp_fw_logged and "ACK:V2" in serial_ack:
+                    self._esp_fw_logged = True
+                    if ack.fw == ESP_FW_TURNBLK:
+                        print(f"[ESP-FW] OK fw={ack.fw} — firmware con bloqueo prio (sin aperturaEsquina).",
+                              flush=True)
+                    elif ack.fw:
+                        print(f"[ESP-FW] ACK trae fw={ack.fw} (esperaba {ESP_FW_TURNBLK}).",
+                              flush=True)
+                    else:
+                        print("[ESP-FW] ACK sin fw= — ESP32 NO tiene el firmware nuevo. "
+                              "Hay que subirlo por USB.", flush=True)
 
                 estado_now = ack.est
                 if estado_now is not None:
