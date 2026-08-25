@@ -176,12 +176,15 @@ CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
 # ─── Líneas de esquina (naranja/azul, ver reglamento WRO) — corner_lines.py ───
 # Marcadores FÍSICOS FIJOS del tapete, en cada esquina. Recuperado del
 # historial (commit 2ab26e2, revertido junto con un intento incompleto de
-# disparo de giro — la detección en sí funcionaba). Naranja reutiliza el
-# umbral ya confirmado hoy (FLOOR_LOWER/UPPER_ORANGE); azul usa el rango
-# medido en pista real hoy (ver [HSV banda debajo de naranja] en
-# runtime_nuevo.py) — los valores originales de este archivo nunca se
-# calibraron contra el tapete real.
-LINE_ORANGE_HSV = [(FLOOR_LOWER_ORANGE, FLOOR_UPPER_ORANGE)]
+# disparo de giro — la detección en sí funcionaba).
+# Naranja: NO reutiliza FLOOR_LOWER/UPPER_ORANGE (S>=70 ahí es a propósito
+# permisivo porque detect_centerline() lo limpia con apertura/cierre
+# morfológico antes de usarlo; corner_lines.py no tiene esa limpieza, así
+# que ese umbral daba falsos positivos con ruido disperso). Se usa en su
+# lugar la última afinación histórica (commit e59a8f0), más estricta.
+# Azul: rango medido en pista real hoy (ver [HSV banda debajo de naranja]
+# en runtime_nuevo.py).
+LINE_ORANGE_HSV = [(np.array([7, 90, 150]), np.array([15, 180, 210]))]
 LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]
 
 LINE_MIN_PIXELS   = 40   # píxeles mínimos en BEV para considerar "veo la línea"
