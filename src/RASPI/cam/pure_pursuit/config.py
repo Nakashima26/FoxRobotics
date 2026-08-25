@@ -80,8 +80,8 @@ FLOOR_UPPER = np.array([35, 80, 255])
 FLOOR_LOWER_BLUE = np.array([95, 50, 10])
 FLOOR_UPPER_BLUE = np.array([150, 255, 220])
 
-FLOOR_LOWER_BLUE_WIDE = np.array([90, 15, 60])   # baja el mínimo de S y sube V
-FLOOR_UPPER_BLUE_WIDE = np.array([150, 255, 230])
+FLOOR_LOWER_BLUE_WIDE = np.array([120, 30, 5])    # medido en pista real (ver [HSV banda debajo de naranja])
+FLOOR_UPPER_BLUE_WIDE = np.array([150, 200, 100])
 
 WALL_STRUCTURE_PX = 15   # <-- ajusta viendo tu imagen BEV real
 
