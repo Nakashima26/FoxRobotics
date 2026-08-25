@@ -370,7 +370,7 @@ def draw_bev_debug(
     if line_info:
         h, w = out.shape[:2]
         y_txt = 58
-        for color, col_bgr in (("Orange", (0, 140, 255)), ("Blue", (255, 120, 0))):
+        for color, col_bgr in (("Orange", (0, 140, 255)),):
             info = line_info.get(color, {"seen": False, "near_y": None})
             if info["seen"]:
                 ny = int(info["near_y"])

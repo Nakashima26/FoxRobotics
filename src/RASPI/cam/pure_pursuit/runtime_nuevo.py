@@ -282,8 +282,7 @@ class PPRuntime:
                 bev_obstacles = []
                 pp_active     = False
                 pasado        = False
-                line_info     = {"Orange": {"seen": False, "near_y": None},
-                                  "Blue":   {"seen": False, "near_y": None}}
+                line_info     = {"Orange": {"seen": False, "near_y": None}}
 
                 if self.bev.is_calibrated:
                     try:
@@ -317,9 +316,22 @@ class PPRuntime:
                             # verdad", no "dejé de verlo". Dispara RECUPERANDO.
                             pasado = self.memory.last_passed
 
-                        # ── Líneas de esquina (naranja/azul) — solo identificación
-                        # visual por ahora, ver corner_lines.py.
+                        # ── Línea de esquina naranja — solo identificación visual
+                        # por ahora, ver corner_lines.py.
                         line_info = detect_lines(bev_frame)
+
+                        # ── DIAGNÓSTICO TEMPORAL: dirección de giro inferida por
+                        # posición del obstáculo visto MÁS ALLÁ de la naranja
+                        # (su lado izq/der respecto al centro del robot). Solo
+                        # imprime — todavía no cambia ningún comportamiento.
+                        orange_info = line_info["Orange"]
+                        if orange_info["seen"]:
+                            beyond = [o for o in bev_obstacles if o[1] < orange_info["near_y"]]
+                            if beyond:
+                                ox0 = beyond[0][0]
+                                dir_guess = "DERECHA" if ox0 > C.ROBOT_BEV_X else "IZQUIERDA"
+                                print(f"[DIR] obstáculo después de naranja en x={ox0:.0f} "
+                                      f"(centro={C.ROBOT_BEV_X}) -> giro {dir_guess}", flush=True)
 
                         # Detectar centerline (con obstáculos recordados+nuevos)
                         path_points = detect_centerline(bev_frame, bev_obstacles)
@@ -398,7 +410,7 @@ class PPRuntime:
                     log_line += f" | RX: {serial_ack}"
                 print(log_line, flush=True)
 
-                print(f"[LINEA] Orange={line_info['Orange']}  Blue={line_info['Blue']}", flush=True)
+                print(f"[LINEA] Orange={line_info['Orange']}", flush=True)
 
                 
                 # ── Display ──────────────────────────────────────────────────

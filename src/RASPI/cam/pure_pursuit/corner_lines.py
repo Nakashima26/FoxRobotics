@@ -55,14 +55,14 @@ def _find_near_line_row(mask: np.ndarray, min_run_px: int) -> float | None:
 
 def detect_lines(bev_bgr: np.ndarray) -> dict:
     """
-    Retorna, por color: {'seen': bool, 'near_y': float|None}
-    near_y = coordenada Y-BEV de la franja real más cercana al robot de ese
-    color (no el pixel aislado más cercano — ver _find_near_line_row()).
+    Retorna {'seen': bool, 'near_y': float|None} para la línea naranja.
+    near_y = coordenada Y-BEV de la franja real más cercana al robot
+    (no el pixel aislado más cercano — ver _find_near_line_row()).
+
+    Azul se quitó de la ecuación (daba muchos falsos positivos/negativos y
+    no era confiable) — por ahora solo se seguirá la línea naranja.
     """
     hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
-    out = {}
-    for color, ranges in (("Orange", C.LINE_ORANGE_HSV), ("Blue", C.LINE_BLUE_HSV)):
-        mask = _line_mask(hsv, ranges)
-        near_y = _find_near_line_row(mask, C.LINE_MIN_RUN_PX)
-        out[color] = {"seen": near_y is not None, "near_y": near_y}
-    return out
+    mask = _line_mask(hsv, C.LINE_ORANGE_HSV)
+    near_y = _find_near_line_row(mask, C.LINE_MIN_RUN_PX)
+    return {"Orange": {"seen": near_y is not None, "near_y": near_y}}

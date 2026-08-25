@@ -182,10 +182,12 @@ CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
 # morfológico antes de usarlo; corner_lines.py no tiene esa limpieza, así
 # que ese umbral daba falsos positivos con ruido disperso). Se usa en su
 # lugar la última afinación histórica (commit e59a8f0), más estricta.
-# Azul: rango medido en pista real hoy (ver [HSV banda debajo de naranja]
-# en runtime_nuevo.py).
+# Azul: quitado de la ecuación — daba muchos falsos positivos/negativos y no
+# era confiable. Por ahora corner_lines.py solo sigue la línea naranja. Se
+# deja el rango medido (ver [HSV banda debajo de naranja] en runtime_nuevo.py)
+# por si se retoma más adelante, pero detect_lines() ya no lo usa.
 LINE_ORANGE_HSV = [(np.array([7, 90, 150]), np.array([15, 180, 210]))]
-LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]
+LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]   # sin usar por ahora
 
 LINE_MIN_RUN_PX   = 10   # ancho mínimo de corrida CONTIGUA en una fila para
                           # contar como línea real (no puntos de ruido dispersos)
