@@ -43,7 +43,12 @@ from wro_runtime import (
 
 from .bev import BEVTransformer
 from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
-from .corner_lines import OrangeLineTracker, TurnDirectionTracker, is_interior_pass
+from .corner_lines import (
+    OrangeLineTracker,
+    TurnDirectionTracker,
+    infer_turn_dir_from_ultrasonics,
+    is_interior_pass,
+)
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
@@ -152,15 +157,24 @@ def _bias_scale_for_preturn(
 
     hug_right = ack.dR is not None and ack.dR <= C.WALL_HUG_CM
     hug_left = ack.dL is not None and ack.dL <= C.WALL_HUG_CM
+    opening_left = infer_turn_dir_from_ultrasonics(ack.dL, ack.dR) == "L"
+    opening_right = infer_turn_dir_from_ultrasonics(ack.dL, ack.dR) == "R"
 
-    if near_open:
+    # Verde → pasar por la IZQUIERDA. Peligro si abrazas pared izq. o ya abre
+    # esquina izquierda (misma situación que rojo+derecha, espejada).
+    if has_green and (hug_left or opening_left):
+        scale = C.NEAR_CORNER_BIAS_SCALE if (near_open or opening_left) else C.HUG_BIAS_SCALE
+        reason = "corner_G" if opening_left else "hug_L"
+        return scale, True, reason
+
+    # Rojo → pasar por la DERECHA. Peligro si abrazas pared der. o abre derecha.
+    if has_red and (hug_right or opening_right):
+        scale = C.NEAR_CORNER_BIAS_SCALE if (near_open or opening_right) else C.HUG_BIAS_SCALE
+        reason = "corner_R" if opening_right else "hug_R"
+        return scale, True, reason
+
+    if near_open and (has_red or has_green):
         return C.NEAR_CORNER_BIAS_SCALE, True, "corner"
-    # Rojo pasa a la derecha → peligroso si ya abrazas la pared derecha.
-    if has_red and hug_right:
-        return C.HUG_BIAS_SCALE, True, "hug_R"
-    # Verde pasa a la izquierda → peligroso si ya abrazas la pared izquierda.
-    if has_green and hug_left:
-        return C.HUG_BIAS_SCALE, True, "hug_L"
     return 1.0, False, "ok"
 
 
@@ -453,21 +467,27 @@ class PPRuntime:
                         turn_dir = self.turn_dir_tracker.update(
                             bev_obstacles_beyond, C.ROBOT_BEV_X
                         )
+                        # Sin naranja: inferir giro por ultrasonido (persistente).
+                        turn_dir = self.turn_dir_tracker.update_ultrasonic(
+                            self._last_ack.dL, self._last_ack.dR
+                        ) or turn_dir
 
-                        # ── Interior/exterior del obstáculo actual (el más
-                        # cercano en mi recta): si pasar por su lado (regla de
-                        # color WRO) coincide con hacia dónde va a girar la
-                        # pista, el giro mismo ya resuelve el paso — no hace
-                        # falta que el ESP32 siga bloqueando detectarEsquina()
-                        # por él. Sin dirección confirmada, default seguro:
-                        # False (bloquea igual que siempre).
+                        # Interior/exterior: rojo+giro-derecha o verde+giro-izquierda
+                        # → el giro resuelve el paso (intr=1, ESP no bloquea).
+                        # Cuenta latas en BEV y lejanas en cámara (far_objects).
+                        colors_present = (
+                            {c for _, _, c in bev_obstacles}
+                            | {c for *_, c in far_objects}
+                        )
                         interior = False
-                        if bev_obstacles and turn_dir is not None:
-                            closest = max(bev_obstacles, key=lambda o: o[1])
-                            interior = is_interior_pass(turn_dir, closest[2])
+                        if turn_dir is not None and colors_present:
+                            if "Green" in colors_present and is_interior_pass(turn_dir, "Green"):
+                                interior = True
+                            elif "Red" in colors_present and is_interior_pass(turn_dir, "Red"):
+                                interior = True
 
-                        # Pre-giro / abrazo de pared: atenúa sesgo WRO (rojo→der)
-                        # para no empujar contra la pared interior antes del giro.
+                        # Pre-giro / abrazo de pared: atenúa sesgo WRO (rojo→der,
+                        # verde→izq) para no empujar contra la pared interior.
                         bias_scale, suppress_far, preason = _bias_scale_for_preturn(
                             self._last_ack, bev_obstacles, far_objects
                         )
@@ -496,7 +516,7 @@ class PPRuntime:
                         if C.FAR_HINT_ENABLED:
                             bev_obstacle_active = len(bev_obstacles) > 0
                             if suppress_far or bev_obstacle_active:
-                                # Pre-giro / hug: no anticipar centrado al rojo.
+                                # Pre-giro / hug: no anticipar centrado al rojo/verde.
                                 # Con BEV activo: el hint no compite con esquiva.
                                 self.far_hint.reset_all()
                             else:

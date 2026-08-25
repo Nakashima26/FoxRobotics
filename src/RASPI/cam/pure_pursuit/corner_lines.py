@@ -240,6 +240,20 @@ class TurnDirectionTracker:
             return None
 
         guess = "R" if bev_obstacles_beyond[0][0] > robot_x else "L"
+        return self._commit_guess(guess)
+
+    def update_ultrasonic(self, dL: float | None, dR: float | None) -> str | None:
+        """Misma persistencia que update(), pero con apertura ultrasónica."""
+        if self.direction is not None:
+            return self.direction
+        guess = infer_turn_dir_from_ultrasonics(dL, dR)
+        if guess is None:
+            self._candidate = None
+            self._candidate_count = 0
+            return None
+        return self._commit_guess(guess)
+
+    def _commit_guess(self, guess: str) -> str | None:
         if guess == self._candidate:
             self._candidate_count += 1
         else:
@@ -267,3 +281,25 @@ def is_interior_pass(direction: str | None, color: str) -> bool:
     if direction == "R":
         return color == "Red"
     return color == "Green"
+
+
+def infer_turn_dir_from_ultrasonics(
+    dL: float | None,
+    dR: float | None,
+    open_cm: float = C.PRE_TURN_OPEN_CM,
+    margin_cm: float = C.PRE_TURN_OPEN_MARGIN_CM,
+) -> str | None:
+    """
+    Infiera hacia dónde va a girar la pista mirando qué ultrasonido "abre"
+    primero (misma señal que detectarEsquina en el ESP32, pero sin debounce).
+
+    Útil cuando la naranja aún no se ve: rojo+giro-derecha e
+    verde+giro-izquierda comparten el mismo patrón de apertura.
+    """
+    if dL is None or dR is None:
+        return None
+    if dL >= open_cm and dR < (open_cm - margin_cm):
+        return "L"
+    if dR >= open_cm and dL < (open_cm - margin_cm):
+        return "R"
+    return None
