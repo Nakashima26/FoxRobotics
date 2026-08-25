@@ -162,17 +162,6 @@ OBS_MEM_DEDUPE_PX  = 40.0
 # bastante menos que esto.
 TURN_TIMEOUT_S = 3.0
 
-# ─── Identificación de líneas de sección (naranja/azul, ver reglamento WRO) ──
-# Primer paso: solo IDENTIFICAR dónde está cada línea por separado (sin
-# decidir nada de giro todavía) — ver centerline.detect_orange_blue_lines().
-# Único umbral de forma: ancho mínimo del blob más ancho tras el cierre
-# morfológico de _isolate_line_blob(). A propósito NO hay límite de alto —
-# la línea puede verse curva/diagonal en el BEV (lejos del área calibrada),
-# y un bbox alineado a ejes la rechazaba injustamente.
-# NOTA: valor de arranque sin calibrar en pista real — ajustar viendo el
-# overlay de color en runtime_nuevo.py.
-LINE_MIN_WIDTH_PX = 40
-
 # ─── Hint direccional (obstáculo lejano, fuera de rango BEV) ─────────────────
 # Un objeto rojo/verde detectado en la imagen de cámara CRUDA (no en BEV) que
 # todavía no proyecta dentro del rango calibrado.  Se usa SOLO para empezar a

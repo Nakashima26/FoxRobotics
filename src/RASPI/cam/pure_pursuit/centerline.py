@@ -220,92 +220,6 @@ def _extract_thin_blue_line(hsv: np.ndarray, shape: tuple) -> np.ndarray:
     thin_blue_line = cv2.bitwise_and(blue_wide, cv2.bitwise_not(not_line))
     return thin_blue_line
 
-
-def _isolate_line_blob(mask: np.ndarray, min_width_px: int) -> np.ndarray:
-    """
-    Aísla, dentro de una máscara binaria de color, el blob más ANCHO —
-    tolerando que la línea real venga fragmentada (ruido de compresión, o
-    simplemente que a esa distancia la cinta se vea delgada y discontinua).
-
-    Estrategia:
-      1. Apertura chica (3x3): quita ruido tipo sal-y-pimienta (motas de
-         1-2px sueltas por todo el piso, que es justo lo que estaba pasando
-         con el umbral de naranja).
-      2. Cierre con kernel ANCHO y no tan bajo (31x11): une fragmentos que
-         pertenecen a la misma línea horizontal-ish, sin fusionar ruido dis-
-         perso que quedó separado en Y. A propósito NO se impone un tope de
-         alto — si la línea real se ve en diagonal/curva en el BEV (común
-         cerca o más allá del área calibrada), un bbox alineado a ejes le
-         mediría más "alto" de lo que en realidad es de delgada, y la
-         rechazaría injustamente (eso fue lo que pasó en el intento anterior).
-      3. De los blobs resultantes tras el cierre, se toma el más ancho.
-      4. El resultado se recorta de vuelta contra la máscara ORIGINAL (sin
-         la dilatación que metió el cierre) para no "inventar" pixeles.
-
-    Retorna una máscara del mismo tamaño con solo ese blob (vacía si el más
-    ancho no llega a min_width_px, o si no hay nada).
-    """
-    if cv2.countNonZero(mask) == 0:
-        return np.zeros_like(mask)
-
-    k_open = np.ones((3, 3), np.uint8)
-    cleaned = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k_open)
-    if cv2.countNonZero(cleaned) == 0:
-        cleaned = mask   # la línea real es tan delgada que el open se la comió
-
-    k_bridge = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 11))
-    bridged  = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, k_bridge)
-
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(bridged, connectivity=8)
-    best_i, best_w = None, 0
-    for i in range(1, n):
-        bw = int(stats[i, cv2.CC_STAT_WIDTH])
-        if bw > best_w:
-            best_w, best_i = bw, i
-
-    if best_i is None or best_w < min_width_px:
-        return np.zeros_like(mask)
-
-    region = (labels == best_i).astype(np.uint8)
-    return cv2.bitwise_and(mask, mask, mask=region)
-
-
-def detect_orange_blue_lines(bev_bgr: np.ndarray) -> dict:
-    """
-    Detecta, POR SEPARADO, la línea naranja y la línea azul de límite de
-    sección (ver reglamento WRO) dentro del BEV.
-
-    Primer paso de identificación visual únicamente — NO decide nada de
-    dirección de giro ni clasifica obstáculos todavía (eso viene después,
-    una vez confirmado que la identificación misma es confiable).
-
-    La naranja se toma directamente por color (no hay pared naranja que
-    confundir). La azul reutiliza _extract_thin_blue_line() para separar la
-    cinta delgada de la pared azul/gris gruesa. Ambas pasan por
-    _isolate_line_blob() para descartar ruido disperso.
-
-    Retorna {"orange_mask", "orange_y", "blue_mask", "blue_y"} — cada
-    "*_mask" es una máscara binaria (para pintar el blob real detectado,
-    forma incluida) y cada "*_y" es el promedio de Y de esa máscara en BEV,
-    o None si no se encontró nada.
-    """
-    hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
-
-    orange_raw = cv2.inRange(hsv, C.FLOOR_LOWER_ORANGE, C.FLOOR_UPPER_ORANGE)
-    blue_raw   = _extract_thin_blue_line(hsv, bev_bgr.shape)
-
-    orange_mask = _isolate_line_blob(orange_raw, C.LINE_MIN_WIDTH_PX)
-    blue_mask   = _isolate_line_blob(blue_raw,   C.LINE_MIN_WIDTH_PX)
-
-    def _mean_y(m: np.ndarray) -> float | None:
-        ys, _ = np.where(m > 0)
-        return float(np.mean(ys)) if len(ys) else None
-
-    return {
-        "orange_mask": orange_mask, "orange_y": _mean_y(orange_mask),
-        "blue_mask":   blue_mask,   "blue_y":   _mean_y(blue_mask),
-    }
-
 # ── Detección de centerline ───────────────────────────────────────────────────
 
 def detect_centerline(
@@ -436,8 +350,6 @@ def draw_bev_debug(
     bev_obstacles: list[tuple[float, float, str]],
     steer_deg: float = 0.0,
     pp_active: bool = False,
-    orange_line_mask: np.ndarray | None = None,
-    blue_line_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Dibuja sobre la imagen BEV:
@@ -447,18 +359,8 @@ def draw_bev_debug(
       - Posición del robot con flecha de heading
       - Círculo del radio look-ahead
       - Texto de estado
-      - Línea naranja/azul detectada (orange_line_mask/blue_line_mask, ver
-        detect_orange_blue_lines()) — se pintan los pixeles REALES del blob
-        detectado (no una barra recta), para diagnosticar la forma exacta
-        que está agarrando el detector, curva/diagonal incluida.
     """
     out = bev_bgr.copy()
-
-    # Líneas de sección detectadas — tinta directa de los pixeles del blob
-    if orange_line_mask is not None and cv2.countNonZero(orange_line_mask) > 0:
-        out[orange_line_mask > 0] = (0, 140, 255)   # naranja saturado (BGR)
-    if blue_line_mask is not None and cv2.countNonZero(blue_line_mask) > 0:
-        out[blue_line_mask > 0] = (255, 120, 0)     # azul saturado (BGR)
 
     # Obstáculos
     for ox, oy, color in bev_obstacles:
