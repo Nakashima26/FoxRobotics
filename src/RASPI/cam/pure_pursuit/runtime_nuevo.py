@@ -43,7 +43,7 @@ from wro_runtime import (
 
 from .bev import BEVTransformer
 from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
-from .corner_lines import OrangeLineTracker
+from .corner_lines import OrangeLineTracker, TurnDirectionTracker, is_interior_pass
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
@@ -113,6 +113,7 @@ class PPRuntime:
         self.memory     = ObstacleMemory()
         self.far_hint   = FarHintManager()
         self.line_tracker = OrangeLineTracker()
+        self.turn_dir_tracker = TurnDirectionTracker()
 
         # Estado de la memoria rodante
         self._last_heading: float | None = None
@@ -120,6 +121,7 @@ class PPRuntime:
         self._prev_estado: str | None = None
         self._is_turning: bool = False
         self._turn_start_t: float | None = None
+        self._turn_recovery_frames: int = 0
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
@@ -145,10 +147,12 @@ class PPRuntime:
 
     # ── Serial ────────────────────────────────────────────────────────────────
 
-    def _build_serial_message(self, obs_norm: float, state: str, n_mem_obs: int, pasado: bool) -> str:
+    def _build_serial_message(self, obs_norm: float, state: str, n_mem_obs: int,
+                               pasado: bool, interior: bool) -> str:
         has_obstacle = n_mem_obs > 0   # basado en memoria real, no en steer
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
-                f"state={state},prio={int(has_obstacle)},mem={n_mem_obs},pp=1,pasado={int(pasado)}")
+                f"state={state},prio={int(has_obstacle)},mem={n_mem_obs},pp=1,"
+                f"pasado={int(pasado)},intr={int(interior)}")
 
     # ── Captura ───────────────────────────────────────────────────────────────
 
@@ -285,6 +289,7 @@ class PPRuntime:
                 pasado        = False
                 line_info     = {"Orange": {"seen": False, "near_y": None}}
                 bev_obstacles_beyond = []
+                interior      = False
 
                 if self.bev.is_calibrated:
                     try:
@@ -324,16 +329,25 @@ class PPRuntime:
                         # despejado frame a frame.
                         line_info = {"Orange": self.line_tracker.update(bev_frame)}
 
+                        # ── Cooldown post-giro: justo al salir de un giro,
+                        # OrangeLineTracker se reseteó y apenas está re-
+                        # acumulando lecturas sobre la recta nueva — no confiar
+                        # en su clasificación todavía (ver TURN_RECOVERY_FRAMES).
+                        en_recuperacion_giro = self._turn_recovery_frames > 0
+                        if self._turn_recovery_frames > 0:
+                            self._turn_recovery_frames -= 1
+
                         # ── Filtrar obstáculos MÁS ALLÁ de la naranja: no deben
                         # esquivarse todavía (están en la siguiente recta, no en
                         # la mía) — antes de esto, detect_centerline() los
                         # mezclaba con los reales y armaba rutas en zigzag
                         # intentando satisfacer el lado de paso de un obstáculo
                         # que ni siquiera es alcanzable aún. Sin línea visible,
-                        # no se filtra nada (mismo comportamiento de siempre).
+                        # o en el cooldown post-giro, no se filtra nada (todo
+                        # cuenta como mi recta — mismo comportamiento de siempre).
                         bev_obstacles_beyond = []
                         orange_info = line_info["Orange"]
-                        if orange_info["seen"]:
+                        if orange_info["seen"] and not en_recuperacion_giro:
                             bev_obstacles_mine = []
                             for o in bev_obstacles:
                                 if self.line_tracker.classify(
@@ -344,15 +358,25 @@ class PPRuntime:
                                     bev_obstacles_mine.append(o)
                             bev_obstacles = bev_obstacles_mine
 
-                        # ── DIAGNÓSTICO TEMPORAL: dirección de giro inferida por
-                        # posición del obstáculo visto MÁS ALLÁ de la naranja
-                        # (su lado izq/der respecto al centro del robot). Solo
-                        # imprime — todavía no cambia ningún comportamiento.
-                        if bev_obstacles_beyond:
-                            ox0 = bev_obstacles_beyond[0][0]
-                            dir_guess = "DERECHA" if ox0 > C.ROBOT_BEV_X else "IZQUIERDA"
-                            print(f"[DIR] obstáculo después de naranja en x={ox0:.0f} "
-                                  f"(centro={C.ROBOT_BEV_X}) -> giro {dir_guess}", flush=True)
+                        # ── Dirección de giro: se infiere UNA SOLA VEZ (con
+                        # persistencia, ver TurnDirectionTracker) de la posición
+                        # lateral de un obstáculo visto más allá de la naranja,
+                        # y se queda fija toda la carrera.
+                        turn_dir = self.turn_dir_tracker.update(
+                            bev_obstacles_beyond, C.ROBOT_BEV_X
+                        )
+
+                        # ── Interior/exterior del obstáculo actual (el más
+                        # cercano en mi recta): si pasar por su lado (regla de
+                        # color WRO) coincide con hacia dónde va a girar la
+                        # pista, el giro mismo ya resuelve el paso — no hace
+                        # falta que el ESP32 siga bloqueando detectarEsquina()
+                        # por él. Sin dirección confirmada, default seguro:
+                        # False (bloquea igual que siempre).
+                        interior = False
+                        if bev_obstacles and turn_dir is not None:
+                            closest = max(bev_obstacles, key=lambda o: o[1])
+                            interior = is_interior_pass(turn_dir, closest[2])
 
                         # Detectar centerline (con obstáculos recordados+nuevos,
                         # ya sin los que quedaron más allá de la naranja)
@@ -397,7 +421,9 @@ class PPRuntime:
                 state = "pp_follow" if pp_active else "no_path"
 
                 # ── Construir y enviar mensaje serial ────────────────────────
-                serial_msg = self._build_serial_message(obs_norm, state, len(bev_obstacles), pasado)
+                serial_msg = self._build_serial_message(
+                    obs_norm, state, len(bev_obstacles), pasado, interior
+                )
                 self.serial_link.send_line(serial_msg)
                 serial_ack = self.serial_link.try_readline()
 
@@ -418,6 +444,7 @@ class PPRuntime:
                         # Terminó el giro -> la memoria ya está vacía (no se tocó), arranca
                         # limpia con las detecciones frescas de este frame.
                         self._is_turning = False
+                        self._turn_recovery_frames = C.TURN_RECOVERY_FRAMES
                         print("[MEM] Giro terminado — memoria de obstáculos reactivada.", flush=True)
                     self._prev_estado = estado_now
 
@@ -434,6 +461,7 @@ class PPRuntime:
                 print(log_line, flush=True)
 
                 print(f"[LINEA] Orange={line_info['Orange']}", flush=True)
+                print(f"[DIR] fija={self.turn_dir_tracker.direction} interior={interior}", flush=True)
 
                 
                 # ── Display ──────────────────────────────────────────────────

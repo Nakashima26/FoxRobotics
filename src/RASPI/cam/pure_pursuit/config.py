@@ -203,6 +203,14 @@ LINE_FIT_BAND_PX     = 60   # +-px alrededor de near_y de donde se toman pixeles
 LINE_FIT_MIN_POINTS  = 30   # pixeles mínimos en la banda para confiar en la pendiente ajustada;
                              # si no alcanza, se usa el fallback horizontal (solo Y) de siempre
 
+# Frames tras TERMINAR un giro durante los cuales NO se filtra por la línea
+# naranja (todo cuenta como "mi recta", sin excepción) — justo al salir de
+# un giro, OrangeLineTracker se reseteó y apenas está re-acumulando lecturas
+# sobre la recta nueva; un obstáculo real recién detectado ahí no debe
+# arriesgarse a que se clasifique "más allá" por una lectura de línea que
+# todavía no se estabilizó sobre datos reales de esta recta.
+TURN_RECOVERY_FRAMES = 10
+
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=35  →  obs=steer_deg/35
 # Cuando pp=0:  ESP32 usa visionSteerGain=80  (comportamiento V1 actual)

@@ -84,6 +84,11 @@ bool  piPurePursuit = false;  // pp=1: Pi en modo Pure Pursuit
 bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
                                // FÍSICAMENTE detrás del robot este frame (no que
                                // simplemente dejó de verlo) — dispara RECUPERANDO.
+bool  piInteriorPass = false; // intr=1: el obstáculo actual se pasa por el mismo
+                               // lado hacia el que va a girar la pista (la Pi ya
+                               // sabe la dirección de giro, por visión, y el color
+                               // del obstáculo) — el giro mismo resuelve el paso,
+                               // no hace falta seguir bloqueando detectarEsquina().
 bool  piReady      = false;
 
 unsigned long lastPiMsgMs = 0;
@@ -286,6 +291,19 @@ void parsePiMessage(String line) {
       piPasado = (s.toInt() != 0);
     } else {
       piPasado = false;
+    }
+
+    // intr — el obstáculo actual se pasa por el mismo lado hacia el que va
+    // a girar la pista (ver corner_lines.py en la Pi). Ausente en V1 o si
+    // la Pi aún no confirmó la dirección de giro → false por defecto
+    // (mismo comportamiento de siempre: sigue bloqueando).
+    idx = line.indexOf("intr=");
+    if (idx >= 0) {
+      int end = line.indexOf(',', idx);
+      String s = (end >= 0) ? line.substring(idx + 5, end) : line.substring(idx + 5);
+      piInteriorPass = (s.toInt() != 0);
+    } else {
+      piInteriorPass = false;
     }
 
     piReady     = true;
@@ -562,7 +580,12 @@ void loop() {
       // hace falta aquí — mientras el chasis sigue desalineado, ese trabajo
       // lo hace el estado RECUPERANDO, que ni siquiera llega a evaluar
       // detectarEsquina() porque vive en otro case del switch.)
-      bool bloqueadoPorObstaculo = piPriority || (piMemoryFrames > 0);
+      // Excepción: si el obstáculo se pasa por el mismo lado hacia el que
+      // ya se sabe que va a girar la pista (piInteriorPass), el giro mismo
+      // resuelve el paso — no tiene caso seguir bloqueando. piInteriorPass
+      // es false por defecto (sin dirección confirmada aún, o exterior),
+      // así que sin eso el comportamiento es idéntico al de siempre.
+      bool bloqueadoPorObstaculo = (piPriority || (piMemoryFrames > 0)) && !piInteriorPass;
 
       if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo
@@ -655,6 +678,7 @@ void loop() {
   Serial.print(" | turn:");     Serial.print(turnHint);
   Serial.print(" | prio:");     Serial.print(piPriority ? 1 : 0);
   Serial.print(" | mem:");      Serial.print(piMemoryFrames);
+  Serial.print(" | intr:");     Serial.print(piInteriorPass ? 1 : 0);
   Serial.print(" | giros:");    Serial.print(turnsCompleted);
   Serial.print("/");            Serial.println(TURNS_PER_RACE);
 }

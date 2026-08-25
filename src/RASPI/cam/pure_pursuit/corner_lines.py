@@ -197,3 +197,73 @@ class OrangeLineTracker:
         if line is not None:
             return line_side_is_near(ox, oy, line, robot_x, robot_y)
         return oy > self.stable["near_y"]
+
+
+class TurnDirectionTracker:
+    """
+    Fija la dirección de giro (izquierda/derecha) inferida de la posición
+    lateral de un obstáculo visto más allá de la línea naranja: si cae a la
+    derecha del centro del robot, la pista gira a la derecha; si cae a la
+    izquierda, gira a la izquierda.
+
+    Igual que OrangeLineTracker, exige que la misma dirección salga
+    PERSIST_FRAMES seguidos antes de fijarla — es una decisión demasiado
+    importante (si sale mal, el carro gira contra la dirección real) como
+    para fijarla de un solo dato ruidoso.
+
+    Una vez fijada (self.direction is not None), NO vuelve a cambiar en
+    toda la carrera — mismo criterio que direccionIzquierda/primerGiro en
+    el ESP32 (PurePursuit.ino), pero determinado por visión en vez de
+    ultrasónicos, y potencialmente antes de llegar físicamente a la
+    primera esquina.
+    """
+
+    def __init__(self, persist_frames: int = 5):
+        self.persist_frames = persist_frames
+        self.direction: str | None = None   # "L" o "R"; None = aún no confirmada
+        self._candidate: str | None = None
+        self._candidate_count = 0
+
+    def reset(self):
+        self.direction = None
+        self._candidate = None
+        self._candidate_count = 0
+
+    def update(self, bev_obstacles_beyond: list[tuple[float, float, str]],
+               robot_x: float) -> str | None:
+        if self.direction is not None:
+            return self.direction   # ya fija, no se vuelve a evaluar
+
+        if not bev_obstacles_beyond:
+            self._candidate = None
+            self._candidate_count = 0
+            return None
+
+        guess = "R" if bev_obstacles_beyond[0][0] > robot_x else "L"
+        if guess == self._candidate:
+            self._candidate_count += 1
+        else:
+            self._candidate = guess
+            self._candidate_count = 1
+
+        if self._candidate_count >= self.persist_frames:
+            self.direction = self._candidate
+
+        return self.direction
+
+
+def is_interior_pass(direction: str | None, color: str) -> bool:
+    """
+    True si pasar este obstáculo (por su color, regla WRO: Rojo->derecha,
+    Verde->izquierda) coincide con el lado hacia el que va a girar la
+    pista — en ese caso, el giro mismo ya resuelve el paso, no hace falta
+    bloquear detectarEsquina() esperando a que Pure Pursuit lo esquive del
+    todo. False si no coincide (exterior) o si la dirección aún no se ha
+    confirmado (default seguro: tratar como bloqueante, comportamiento de
+    siempre).
+    """
+    if direction is None:
+        return False
+    if direction == "R":
+        return color == "Red"
+    return color == "Green"
