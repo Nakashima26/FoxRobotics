@@ -308,12 +308,23 @@ void parsePiMessage(String line) {
 
     piReady     = true;
     lastPiMsgMs = millis();
-    // Regresamos el heading integrado del gyro para que la Pi pueda mantener
-    // su mapa rodante de obstáculos alineado al doblar (obstacle_memory.py).
+    // Heading + estado + progreso + pre-giro (ultrasonidos) para que la Pi
+    // suavice el sesgo WRO (rojo→derecha) antes de pegarse a la pared interior.
+    // corner=1 si algún ultrasonido ya "abre" (misma lógica que detectarEsquina,
+    // sin exigir debounce completo — señal temprana).
+    bool cornerOpen = (distL_filtrada > umbralPared) || (distR_filtrada > umbralPared);
     Serial2.print("ACK:V2,ang=");
     Serial2.print(anguloGyro, 2);
     Serial2.print(",est=");
-    Serial2.println(estado == GIRANDO ? "G" : (estado == RECUPERANDO ? "R" : "S"));
+    Serial2.print(estado == GIRANDO ? "G" : (estado == RECUPERANDO ? "R" : "S"));
+    Serial2.print(",giros=");
+    Serial2.print(turnsCompleted);
+    Serial2.print(",corner=");
+    Serial2.print(cornerOpen ? 1 : 0);
+    Serial2.print(",dL=");
+    Serial2.print((int)distL_filtrada);
+    Serial2.print(",dR=");
+    Serial2.println((int)distR_filtrada);
     return;
   }
 
@@ -576,16 +587,16 @@ void loop() {
 
       controlPID(distL, distR);
 
-      // No girar si hay obstáculo activo en Pi.  (El gate de heading ya no
-      // hace falta aquí — mientras el chasis sigue desalineado, ese trabajo
-      // lo hace el estado RECUPERANDO, que ni siquiera llega a evaluar
-      // detectarEsquina() porque vive en otro case del switch.)
-      // Excepción: si el obstáculo se pasa por el mismo lado hacia el que
-      // ya se sabe que va a girar la pista (piInteriorPass), el giro mismo
-      // resuelve el paso — no tiene caso seguir bloqueando. piInteriorPass
-      // es false por defecto (sin dirección confirmada aún, o exterior),
-      // así que sin eso el comportamiento es idéntico al de siempre.
-      bool bloqueadoPorObstaculo = (piPriority || (piMemoryFrames > 0)) && !piInteriorPass;
+      // No girar si hay obstáculo activo en Pi, EXCEPTO:
+      //   1) piInteriorPass: el paso interior coincide con el giro de pista
+      //      (el giro mismo resuelve el esquive).
+      //   2) apertura ultrasónica: la esquina ya "abrió" — si seguimos
+      //      centrando un rojo lejano pegados a la pared interior, chocamos.
+      bool aperturaEsquina = (distL > umbralPared) || (distR > umbralPared);
+      bool bloqueadoPorObstaculo =
+          (piPriority || (piMemoryFrames > 0))
+          && !piInteriorPass
+          && !aperturaEsquina;
 
       if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo

@@ -75,26 +75,102 @@ class PPConfig:
 
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _parse_heading(ack: str) -> float | None:
-    """Extrae ang=<float> de 'ACK:V2,ang=12.34'.  None si no está presente."""
-    if not ack:
-        return None
-    idx = ack.find("ang=")
-    if idx < 0:
-        return None
-    try:
-        return float(ack[idx + 4:].split(",")[0])
-    except (ValueError, IndexError):
-        return None
+@dataclass
+class EspAck:
+    """Campos del ACK:V2 del ESP32 (heading + señales de pre-giro)."""
+    ang: float | None = None
+    est: str | None = None
+    giros: int = 0
+    corner: bool = False
+    dL: float | None = None
+    dR: float | None = None
 
-def _parse_estado(ack: str) -> str | None:
-    if not ack:
-        return None
-    idx = ack.find("est=")
+
+def _parse_ack_field(ack: str, key: str) -> str | None:
+    idx = ack.find(key + "=")
     if idx < 0:
         return None
-    val = ack[idx + 4: idx + 5]
-    return val if val in ("G", "R", "S") else None
+    raw = ack[idx + len(key) + 1:].split(",")[0].strip()
+    return raw or None
+
+
+def _parse_ack(ack: str) -> EspAck:
+    """Parsea 'ACK:V2,ang=12.34,est=S,giros=3,corner=0,dL=45,dR=22'."""
+    out = EspAck()
+    if not ack:
+        return out
+    ang_s = _parse_ack_field(ack, "ang")
+    if ang_s is not None:
+        try:
+            out.ang = float(ang_s)
+        except ValueError:
+            pass
+    est_s = _parse_ack_field(ack, "est")
+    if est_s is not None and est_s[:1] in ("G", "R", "S"):
+        out.est = est_s[:1]
+    giros_s = _parse_ack_field(ack, "giros")
+    if giros_s is not None:
+        try:
+            out.giros = int(float(giros_s))
+        except ValueError:
+            pass
+    corner_s = _parse_ack_field(ack, "corner")
+    if corner_s is not None:
+        try:
+            out.corner = int(float(corner_s)) != 0
+        except ValueError:
+            pass
+    for attr, key in (("dL", "dL"), ("dR", "dR")):
+        s = _parse_ack_field(ack, key)
+        if s is not None:
+            try:
+                setattr(out, attr, float(s))
+            except ValueError:
+                pass
+    return out
+
+
+def _bias_scale_for_preturn(
+    ack: EspAck,
+    bev_obstacles: list[tuple[float, float, str]],
+    far_objects: list[tuple[float, float, float, str]],
+) -> tuple[float, bool, str]:
+    """
+    Escala el sesgo WRO cerca de esquina / pegado a pared interior.
+
+    Retorna (bias_scale, suppress_far_hint, reason).
+    """
+    colors = {c for _, _, c in bev_obstacles} | {c for *_, c in far_objects}
+    has_red = "Red" in colors
+    has_green = "Green" in colors
+
+    near_open = ack.corner
+    if ack.dL is not None and ack.dL >= C.PRE_TURN_OPEN_CM:
+        near_open = True
+    if ack.dR is not None and ack.dR >= C.PRE_TURN_OPEN_CM:
+        near_open = True
+
+    hug_right = ack.dR is not None and ack.dR <= C.WALL_HUG_CM
+    hug_left = ack.dL is not None and ack.dL <= C.WALL_HUG_CM
+
+    if near_open:
+        return C.NEAR_CORNER_BIAS_SCALE, True, "corner"
+    # Rojo pasa a la derecha → peligroso si ya abrazas la pared derecha.
+    if has_red and hug_right:
+        return C.HUG_BIAS_SCALE, True, "hug_R"
+    # Verde pasa a la izquierda → peligroso si ya abrazas la pared izquierda.
+    if has_green and hug_left:
+        return C.HUG_BIAS_SCALE, True, "hug_L"
+    return 1.0, False, "ok"
+
+
+def _has_close_obstacle(bev_obstacles: list[tuple[float, float, str]]) -> bool:
+    """True si hay una lata lo bastante cerca como para bloquear el giro."""
+    for _, oy, _ in bev_obstacles:
+        ahead = C.ROBOT_BEV_Y - float(oy)
+        if 0.0 <= ahead <= C.TURN_BLOCK_AHEAD_PX:
+            return True
+    return False
 
 
 class PPRuntime:
@@ -115,13 +191,16 @@ class PPRuntime:
         self.line_tracker = OrangeLineTracker()
         self.turn_dir_tracker = TurnDirectionTracker()
 
-        # Estado de la memoria rodante
+        # Estado de la memoria rodante + pre-giro (ACK ESP32, 1 frame de lag)
         self._last_heading: float | None = None
         self._last_update_t: float | None = None
         self._prev_estado: str | None = None
         self._is_turning: bool = False
         self._turn_start_t: float | None = None
         self._turn_recovery_frames: int = 0
+        self._last_ack = EspAck()
+        self._bias_scale = 1.0
+        self._preturn_reason = "ok"
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
@@ -148,10 +227,14 @@ class PPRuntime:
     # ── Serial ────────────────────────────────────────────────────────────────
 
     def _build_serial_message(self, obs_norm: float, state: str, n_mem_obs: int,
-                               pasado: bool, interior: bool) -> str:
-        has_obstacle = n_mem_obs > 0   # basado en memoria real, no en steer
+                               pasado: bool, interior: bool,
+                               block_turn: bool | None = None) -> str:
+        # prio: bloquea giro en ESP32. En pre-giro solo latas cercanas;
+        # pasado/intr siguen informando RECUPERANDO / paso interior.
+        if block_turn is None:
+            block_turn = n_mem_obs > 0
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
-                f"state={state},prio={int(has_obstacle)},mem={n_mem_obs},pp=1,"
+                f"state={state},prio={int(block_turn)},mem={n_mem_obs},pp=1,"
                 f"pasado={int(pasado)},intr={int(interior)}")
 
     # ── Captura ───────────────────────────────────────────────────────────────
@@ -206,10 +289,15 @@ class PPRuntime:
         fps:          float,
         n_mem:        int,
     ):
+        ack = self._last_ack
+        dL = f"{ack.dL:.0f}" if ack.dL is not None else "?"
+        dR = f"{ack.dR:.0f}" if ack.dR is not None else "?"
         lines = [
             f"fps={fps:.1f}  pp={'ON' if pp_active else 'OFF'}  pts={n_path_pts}",
             f"steer={steer_deg:+.1f} deg  obs={obs_norm:+.3f}",
             f"obs_R={len(positions.get('Red', []))}  obs_G={len(positions.get('Green', []))}  mem={n_mem}",
+            (f"recta={ack.giros}  corner={int(ack.corner)}  "
+             f"dL={dL} dR={dR}  bias={self._bias_scale:.2f}/{self._preturn_reason}"),
             f"tx: {serial_msg[:55]}",
         ]
         y = 22
@@ -378,9 +466,19 @@ class PPRuntime:
                             closest = max(bev_obstacles, key=lambda o: o[1])
                             interior = is_interior_pass(turn_dir, closest[2])
 
+                        # Pre-giro / abrazo de pared: atenúa sesgo WRO (rojo→der)
+                        # para no empujar contra la pared interior antes del giro.
+                        bias_scale, suppress_far, preason = _bias_scale_for_preturn(
+                            self._last_ack, bev_obstacles, far_objects
+                        )
+                        self._bias_scale = bias_scale
+                        self._preturn_reason = preason
+
                         # Detectar centerline (con obstáculos recordados+nuevos,
                         # ya sin los que quedaron más allá de la naranja)
-                        path_points = detect_centerline(bev_frame, bev_obstacles)
+                        path_points = detect_centerline(
+                            bev_frame, bev_obstacles, bias_scale=bias_scale
+                        )
 
                         if len(path_points) >= C.MIN_PATH_PTS:
                             lookahead_eff = self.controller.adaptive_lookahead(
@@ -397,16 +495,16 @@ class PPRuntime:
                         far_hint_deg = 0.0
                         if C.FAR_HINT_ENABLED:
                             bev_obstacle_active = len(bev_obstacles) > 0
-                            if not bev_obstacle_active:
+                            if suppress_far or bev_obstacle_active:
+                                # Pre-giro / hug: no anticipar centrado al rojo.
+                                # Con BEV activo: el hint no compite con esquiva.
+                                self.far_hint.reset_all()
+                            else:
                                 far_hint_deg = self.far_hint.compute(far_objects)
                                 if pp_active:
                                     steer_deg = max(-C.MAX_STEER_DEG,
                                                      min(C.MAX_STEER_DEG,
                                                          steer_deg + far_hint_deg))
-                            else:
-                                # Hay un obstáculo BEV real activo → el hint no
-                                # debe competir con la esquiva geométrica precisa.
-                                self.far_hint.reset_all()
                         if pp_active:
                             obs_norm = self.controller.normalize(steer_deg)
                             
@@ -420,18 +518,29 @@ class PPRuntime:
                 # Sin línea válida → recto (obs=0).
                 state = "pp_follow" if pp_active else "no_path"
 
+                # En pre-giro solo latas cercanas bloquean el giro del ESP32.
+                near_preturn = self._preturn_reason != "ok"
+                if near_preturn:
+                    block_turn = _has_close_obstacle(bev_obstacles)
+                    mem_report = len(bev_obstacles) if block_turn else 0
+                else:
+                    block_turn = len(bev_obstacles) > 0
+                    mem_report = len(bev_obstacles)
+
                 # ── Construir y enviar mensaje serial ────────────────────────
                 serial_msg = self._build_serial_message(
-                    obs_norm, state, len(bev_obstacles), pasado, interior
+                    obs_norm, state, mem_report, pasado, interior, block_turn
                 )
                 self.serial_link.send_line(serial_msg)
                 serial_ack = self.serial_link.try_readline()
 
-                heading = _parse_heading(serial_ack)
-                if heading is not None:
-                    self._last_heading = heading
+                # ACK (heading + corner/dL/dR) aplica al SIGUIENTE frame
+                ack = _parse_ack(serial_ack)
+                self._last_ack = ack
+                if ack.ang is not None:
+                    self._last_heading = ack.ang
 
-                estado_now = _parse_estado(serial_ack)
+                estado_now = ack.est
                 if estado_now is not None:
                     if estado_now == "G" and self._prev_estado != "G":
                         # Empieza el giro físico -> vaciar YA y apagar la memoria.
