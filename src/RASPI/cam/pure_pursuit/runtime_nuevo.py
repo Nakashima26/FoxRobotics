@@ -42,7 +42,7 @@ from wro_runtime import (
 )
 
 from .bev import BEVTransformer
-from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
+from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug, detect_orange_blue_lines
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
@@ -281,6 +281,8 @@ class PPRuntime:
                 bev_obstacles = []
                 pp_active     = False
                 pasado        = False
+                lines_info    = {"orange_mask": None, "orange_y": None,
+                                  "blue_mask": None, "blue_y": None}
 
                 if self.bev.is_calibrated:
                     try:
@@ -313,6 +315,11 @@ class PPRuntime:
                             # del robot recién en este update -> "ya lo pasé de
                             # verdad", no "dejé de verlo". Dispara RECUPERANDO.
                             pasado = self.memory.last_passed
+
+                        # ── DIAGNÓSTICO TEMPORAL: identificar líneas naranja/azul ──
+                        # Solo identificación visual — todavía no decide nada de
+                        # giro ni clasifica obstáculos (eso viene después).
+                        lines_info = detect_orange_blue_lines(bev_frame)
 
                         # Detectar centerline (con obstáculos recordados+nuevos)
                         path_points = detect_centerline(bev_frame, bev_obstacles)
@@ -391,6 +398,12 @@ class PPRuntime:
                     log_line += f" | RX: {serial_ack}"
                 print(log_line, flush=True)
 
+                # ── DIAGNÓSTICO TEMPORAL: identificación de líneas naranja/azul.
+                # Quitar junto con el pintado de abajo una vez confirmado que la
+                # identificación es confiable (ver detect_orange_blue_lines()).
+                oy, by = lines_info["orange_y"], lines_info["blue_y"]
+                print(f"[LINEA] orange_y={oy}  blue_y={by}", flush=True)
+
                 
                 # ── Display ──────────────────────────────────────────────────
                 self._annotate(processed_frame, steer_deg, obs_norm,
@@ -401,6 +414,8 @@ class PPRuntime:
                     bev_debug = draw_bev_debug(
                         bev_frame, path_points, lookahead_pt,
                         bev_obstacles, steer_deg, pp_active,
+                        orange_line_mask=lines_info["orange_mask"],
+                        blue_line_mask=lines_info["blue_mask"],
                     )
                     bev_h = processed_frame.shape[0]
                     bev_small = cv2.resize(bev_debug, (bev_h, bev_h))
