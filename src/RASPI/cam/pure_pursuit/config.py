@@ -149,12 +149,14 @@ STEER_DIST_GAIN_MIN     = 0.5
 # para no perder la inflación cuando la lata sale del campo de visión.
 ROBOT_SPEED_MMS    = 350.0   # velocidad de marcha asumida (mm/s). Ajustar al carro real.
 OBS_MEM_MATCH_PX   = 50.0    # radio para fusionar una detección nueva con una recordada (px BEV)
-OBS_MEM_DECAY      = 0.12    # confianza perdida por frame sin re-ver el obstáculo (0..1)
-OBS_MEM_MIN_CONF   = 0.4    # por debajo de esto el obstáculo recordado se descarta
-OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
-OBS_MEM_BEHIND_PAD = 10      # px: tirar el obstáculo cuando queda detrás del robot (bev_y > robot_y + pad)
-OBS_MEM_MAX        = 12      # tope de obstáculos recordados (seguridad)
-OBS_MEM_DEDUPE_PX  = 40.0
+OBS_MEM_DECAY        = 0.12   # confianza perdida por frame sin re-ver (rectas)
+OBS_MEM_DECAY_EVADE  = 0.04   # decay más lento cerca de esquina con lata activa
+OBS_MEM_MIN_CONF     = 0.4    # por debajo de esto el obstáculo recordado se descarta
+OBS_MEM_REFRESH      = 1.0    # confianza al re-detectar (se satura en 1.0)
+OBS_MEM_BEHIND_PAD   = 45     # px (~9 cm): "pasado" solo si quedó bien detrás del eje
+OBS_MEM_PASSED_FRAMES = 3     # frames seguidos atrás antes de marcar pasado=1
+OBS_MEM_MAX          = 12     # tope de obstáculos recordados (seguridad)
+OBS_MEM_DEDUPE_PX    = 40.0
 
 # Red de seguridad para runtime_nuevo.py: si el ESP32 se queda atorado
 # reportando est=G (ack perdido, giro real que nunca termina, etc.), no
@@ -222,6 +224,8 @@ NEAR_CORNER_BIAS_SCALE  = 0.15   # escala del sesgo WRO con corner/apertura
 HUG_BIAS_SCALE          = 0.25   # escala si abrazas la pared del lado de paso
 TURN_BLOCK_AHEAD_PX     = 140    # solo latas más cerca bloquean prio en pre-giro
                                  # (140 px ≈ 280 mm delante del robot en BEV)
+TURN_BLOCK_HOLD_FRAMES  = 4      # latch de prio cerca de esquina tras perder la lata (FOV)
+MIN_BIAS_SCALE_WITH_OBS = 0.7    # piso del sesgo WRO si hay lata real en BEV (no anular esquiva)
 
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=35  →  obs=steer_deg/35

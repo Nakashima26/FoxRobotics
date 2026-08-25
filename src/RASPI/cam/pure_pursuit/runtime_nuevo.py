@@ -148,6 +148,17 @@ def _parse_ack(ack: str) -> EspAck:
     return out
 
 
+def _near_corner(ack: EspAck) -> bool:
+    """True si el ESP reporta pre-esquina (ultrasonido o corner flag)."""
+    if ack.corner:
+        return True
+    if ack.dL is not None and ack.dL >= C.PRE_TURN_OPEN_CM:
+        return True
+    if ack.dR is not None and ack.dR >= C.PRE_TURN_OPEN_CM:
+        return True
+    return False
+
+
 def _bias_scale_for_preturn(
     ack: EspAck,
     bev_obstacles: list[tuple[float, float, str]],
@@ -161,6 +172,7 @@ def _bias_scale_for_preturn(
     colors = {c for _, _, c in bev_obstacles} | {c for *_, c in far_objects}
     has_red = "Red" in colors
     has_green = "Green" in colors
+    has_bev = len(bev_obstacles) > 0
 
     near_open = ack.corner
     if ack.dL is not None and ack.dL >= C.PRE_TURN_OPEN_CM:
@@ -177,17 +189,24 @@ def _bias_scale_for_preturn(
     # esquina izquierda (misma situación que rojo+derecha, espejada).
     if has_green and (hug_left or opening_left):
         scale = C.NEAR_CORNER_BIAS_SCALE if (near_open or opening_left) else C.HUG_BIAS_SCALE
+        if has_bev:
+            scale = max(scale, C.MIN_BIAS_SCALE_WITH_OBS)
         reason = "corner_G" if opening_left else "hug_L"
         return scale, True, reason
 
     # Rojo → pasar por la DERECHA. Peligro si abrazas pared der. o abre derecha.
     if has_red and (hug_right or opening_right):
         scale = C.NEAR_CORNER_BIAS_SCALE if (near_open or opening_right) else C.HUG_BIAS_SCALE
+        if has_bev:
+            scale = max(scale, C.MIN_BIAS_SCALE_WITH_OBS)
         reason = "corner_R" if opening_right else "hug_R"
         return scale, True, reason
 
     if near_open and (has_red or has_green):
-        return C.NEAR_CORNER_BIAS_SCALE, True, "corner"
+        scale = C.NEAR_CORNER_BIAS_SCALE
+        if has_bev:
+            scale = max(scale, C.MIN_BIAS_SCALE_WITH_OBS)
+        return scale, True, "corner"
     return 1.0, False, "ok"
 
 
@@ -220,6 +239,7 @@ class PPRuntime:
         self._bias_scale = 1.0
         self._preturn_reason = "ok"
         self._esp_fw_logged = False
+        self._turn_block_hold = 0
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
@@ -423,7 +443,8 @@ class PPRuntime:
                             bev_obstacles = []
                         else:
                             bev_obstacles = self.memory.update(
-                                new_obstacles, dt_s, self._last_heading
+                                new_obstacles, dt_s, self._last_heading,
+                                near_corner=_near_corner(self._last_ack),
                             )
                             # Evento de un solo frame: un obstáculo quedó detrás
                             # del robot recién en este update -> "ya lo pasé de
@@ -540,8 +561,23 @@ class PPRuntime:
                 # Sin línea válida → recto (obs=0).
                 state = "pp_follow" if pp_active else "no_path"
 
-                # Bloquear giro si hay lata en BEV; solo intr=1 libera en ESP32.
-                block_turn = len(bev_obstacles) > 0 and not interior
+                # Bloquear giro si hay lata en BEV; latch corto solo cerca de esquina
+                # cubre parpadeos de FOV. intr=1 libera de inmediato (paso interior).
+                has_obs = len(bev_obstacles) > 0
+                near_corner = _near_corner(self._last_ack)
+                if interior:
+                    block_turn = False
+                    self._turn_block_hold = 0
+                elif has_obs:
+                    block_turn = True
+                    if near_corner:
+                        self._turn_block_hold = C.TURN_BLOCK_HOLD_FRAMES
+                elif near_corner and self._turn_block_hold > 0:
+                    block_turn = True
+                    self._turn_block_hold -= 1
+                else:
+                    block_turn = False
+                    self._turn_block_hold = 0
                 mem_report = len(bev_obstacles)
 
                 # ── Construir y enviar mensaje serial ────────────────────────
@@ -576,6 +612,7 @@ class PPRuntime:
                         self.line_tracker.reset()   # la línea ya quedó atrás, no aplica a la recta nueva
                         self._is_turning   = True
                         self._turn_start_t = now
+                        self._turn_block_hold = 0
                         print("[MEM] Giro detectado — memoria de obstáculos desactivada.", flush=True)
                     elif estado_now != "G" and self._is_turning:
                         # Terminó el giro -> la memoria ya está vacía (no se tocó), arranca

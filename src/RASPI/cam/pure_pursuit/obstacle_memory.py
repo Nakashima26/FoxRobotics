@@ -28,13 +28,14 @@ from . import config as C
 
 
 class _Obs:
-    __slots__ = ("x", "y", "color", "conf")
+    __slots__ = ("x", "y", "color", "conf", "behind_frames")
 
     def __init__(self, x: float, y: float, color: str, conf: float):
         self.x = x
         self.y = y
         self.color = color
         self.conf = conf
+        self.behind_frames = 0
 
 
 class ObstacleMemory:
@@ -87,11 +88,13 @@ class ObstacleMemory:
 
     # ── Fusión con detecciones nuevas ───────────────────────────────────────────
 
-    def _merge(self, new_obs: list[tuple[float, float, str]]):
+    def _merge(self, new_obs: list[tuple[float, float, str]], *, near_corner: bool):
         match_r2 = C.OBS_MEM_MATCH_PX ** 2
+        slow_decay = near_corner and bool(self._obs or new_obs)
+        decay = C.OBS_MEM_DECAY_EVADE if slow_decay else C.OBS_MEM_DECAY
         # Decaer todos primero; los que se re-vean recuperan confianza al fusionar.
         for o in self._obs:
-            o.conf -= C.OBS_MEM_DECAY
+            o.conf -= decay
 
         for nx, ny, color in new_obs:
             best = None
@@ -107,6 +110,7 @@ class ObstacleMemory:
                 # Re-visto: confiar en la posición fresca de la cámara.
                 best.x, best.y = nx, ny
                 best.conf = C.OBS_MEM_REFRESH
+                best.behind_frames = 0
             else:
                 if len(self._obs) < C.OBS_MEM_MAX:
                     self._obs.append(_Obs(nx, ny, color, C.OBS_MEM_REFRESH))
@@ -165,9 +169,14 @@ class ObstacleMemory:
         for o in self._obs:
             if o.conf < C.OBS_MEM_MIN_CONF:
                 continue                             # perdido de vista, no rebasado
-            if o.y > behind_y:                       # ya quedó detrás del robot
-                passed = True
+            if o.y > behind_y:
+                o.behind_frames += 1
+                if o.behind_frames >= C.OBS_MEM_PASSED_FRAMES:
+                    passed = True
+                else:
+                    kept.append(o)
                 continue
+            o.behind_frames = 0
             if not (0.0 <= o.x < C.BEV_W and 0.0 <= o.y < C.BEV_H):
                 continue
             kept.append(o)
@@ -179,7 +188,9 @@ class ObstacleMemory:
     def update(self,
                new_obs: list[tuple[float, float, str]],
                dt_s: float,
-               heading_deg: float | None
+               heading_deg: float | None,
+               *,
+               near_corner: bool = False,
                ) -> list[tuple[float, float, str]]:
         """
         Avanza el mapa, fusiona detecciones nuevas y devuelve la lista combinada
@@ -188,6 +199,7 @@ class ObstacleMemory:
         new_obs     : obstáculos detectados este frame en coords BEV
         dt_s        : segundos transcurridos desde el update anterior
         heading_deg : ángulo del IMU (anguloGyro del ESP32) o None si no llegó
+        near_corner : decay más lento cerca de esquina (FOV limitado al esquivar)
         """
         ds_px = (C.ROBOT_SPEED_MMS * dt_s) / C.MM_PER_PX if dt_s > 0 else 0.0
 
@@ -199,7 +211,7 @@ class ObstacleMemory:
             self._prev_heading = heading_deg
 
         self._advance(ds_px, dheading)
-        self._merge(new_obs)
+        self._merge(new_obs, near_corner=near_corner)
         self._dedupe()
         self.last_passed = self._prune()
 
