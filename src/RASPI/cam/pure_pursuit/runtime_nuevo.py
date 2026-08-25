@@ -80,9 +80,9 @@ class PPConfig:
 
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Tag que el ESP32 pone en ACK:V2 (,fw=turnblk1) si corre el firmware
-# con bloqueo de giro por prio (sin bypass aperturaEsquina).
-ESP_FW_TURNBLK = "turnblk1"
+# Tag que el ESP32 pone en ACK:V2 (,fw=...) del firmware actual: bloqueo de
+# giro por prio (sin bypass aperturaEsquina) + dir de giro en el ACK.
+ESP_FW_TURNBLK = "turnblk2"
 
 
 @dataclass
@@ -95,6 +95,7 @@ class EspAck:
     dL: float | None = None
     dR: float | None = None
     fw: str | None = None
+    dir_turn: str | None = None    # "L"/"R" del ESP32 (direccionIzquierda); None si aún no hay 1er giro
 
 
 def _parse_ack_field(ack: str, key: str) -> str | None:
@@ -141,6 +142,9 @@ def _parse_ack(ack: str) -> EspAck:
     fw_s = _parse_ack_field(ack, "fw")
     if fw_s is not None:
         out.fw = fw_s.split()[0]
+    dir_s = _parse_ack_field(ack, "dir")
+    if dir_s in ("L", "R"):
+        out.dir_turn = dir_s
     return out
 
 
@@ -468,10 +472,10 @@ class PPRuntime:
                         turn_dir = self.turn_dir_tracker.update(
                             bev_obstacles_beyond, C.ROBOT_BEV_X
                         )
-                        # Sin naranja: inferir giro por ultrasonido (persistente).
-                        turn_dir = self.turn_dir_tracker.update_ultrasonic(
-                            self._last_ack.dL, self._last_ack.dR
-                        ) or turn_dir
+                        # Dirección fiable directa del ESP32 (direccionIzquierda,
+                        # fija tras el 1er giro); gana sobre la inferencia de la Pi.
+                        if self._last_ack.dir_turn is not None:
+                            turn_dir = self._last_ack.dir_turn
 
                         # Interior/exterior: rojo+giro-derecha o verde+giro-izquierda
                         # → el giro resuelve el paso (intr=1, ESP no bloquea).
