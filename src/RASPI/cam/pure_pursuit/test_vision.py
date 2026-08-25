@@ -9,6 +9,9 @@ USO:
 CONTROLES:
   ESC   : salir
   S     : guardar captura del frame actual como bev_snapshot.jpg
+  D     : imprimir en consola los blobs candidatos a línea de esquina
+          (naranja/azul) de este frame, pasen o no el filtro de forma —
+          diagnóstico de detect_corner_line_y() / config.CORNER_LINE_*
 """
 
 import argparse
@@ -26,7 +29,10 @@ if _CAM_DIR not in sys.path:
 
 from vision import Vision
 from .bev        import BEVTransformer
-from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug, detect_corner_line_y
+from .centerline import (
+    detect_centerline, map_obstacle_to_bev, draw_bev_debug,
+    detect_corner_line_y, corner_line_debug_candidates,
+)
 from .controller import PurePursuitController
 from . import config as C
 
@@ -105,8 +111,9 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
                     if result is not None:
                         bev_obstacles.append((result[0], result[1], color_name))
 
-            path_points   = detect_centerline(bev_frame, bev_obstacles)
-            corner_line_y = detect_corner_line_y(bev_frame)
+            path_points       = detect_centerline(bev_frame, bev_obstacles)
+            corner_line_y     = detect_corner_line_y(bev_frame)
+            corner_candidates = corner_line_debug_candidates(bev_frame)
         except Exception as e:
             import traceback
             print(f"[ERROR] {e}", flush=True)
@@ -140,6 +147,19 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
             bev_obstacles_other=bev_obstacles_other,
         )
 
+        # ── DIAGNÓSTICO: dibuja TODOS los blobs naranja/azul candidatos a línea
+        # de esquina, pasen o no el filtro de forma (ver corner_line_debug_candidates
+        # en centerline.py). Verde = pasó todos los filtros, rojo = lo rechazó
+        # alguno (bw/bh/area impresos junto al box). Tecla D imprime el detalle
+        # completo (incluye el rectángulo rotado, útil si la línea es diagonal).
+        for c in corner_candidates:
+            col = (0, 220, 0) if c["ok"] else (0, 0, 255)
+            cv2.rectangle(bev_debug, (c["x"], c["y"]),
+                          (c["x"] + c["w"], c["y"] + c["h"]), col, 1)
+            cv2.putText(bev_debug, f"{c['w']}x{c['h']}",
+                        (c["x"], max(10, c["y"] - 3)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, col, 1)
+
         # ── Overlay en frame de cámara ────────────────────────────────────────
         lines = [
             f"fps={fps:.1f}  pp={'ON' if pp_active else 'OFF'}  pts={len(path_points)}",
@@ -166,6 +186,16 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
             fname = f"bev_snapshot_{loop:04d}.jpg"
             cv2.imwrite(fname, combined)
             print(f"[TEST] Guardado: {fname}", flush=True)
+        if key == ord('d') or key == ord('D'):
+            print(f"[LINEA] corner_line_y={corner_line_y} "
+                  f"candidatos={len(corner_candidates)}", flush=True)
+            for c in corner_candidates:
+                estado = "OK" if c["ok"] else "RECHAZADO: " + ", ".join(c["reasons"])
+                rot = (f"({c['rot_w']:.1f},{c['rot_h']:.1f})"
+                       if c["rot_w"] is not None else "(n/a)")
+                print(f"  [{c['source']:6s}] bbox=({c['x']},{c['y']},{c['w']}x{c['h']}) "
+                      f"area={c['area']} cy={c['cy']:.1f} "
+                      f"rot(grosor,largo)={rot} -> {estado}", flush=True)
 
     cap.release()
     cv2.destroyAllWindows()

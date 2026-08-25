@@ -262,6 +262,55 @@ def detect_corner_line_y(bev_bgr: np.ndarray) -> float | None:
 
     return best_y
 
+
+def corner_line_debug_candidates(bev_bgr: np.ndarray) -> list[dict]:
+    """
+    SOLO PARA DIAGNÓSTICO (test_vision.py) — detect_corner_line_y() sigue
+    siendo la versión de producción, esta función no se usa en el runtime.
+
+    Igual que detect_corner_line_y() pero sin descartar nada: devuelve TODOS
+    los blobs de color naranja/azul-delgado encontrados este frame, pasen o
+    no el filtro de forma, junto con su bounding box (ancho/alto SIN rotar,
+    para comparar contra CORNER_LINE_MIN_WIDTH_PX/MAX_HEIGHT_PX) y el
+    rectángulo mínimo rotado (cv2.minAreaRect) — este último para diagnosticar
+    si la línea real es diagonal/curva y por eso el bbox alineado a ejes le
+    da más alto de lo que realmente es "de delgada".
+
+    Cada entrada: {source, x, y, w, h, area, cy, rot_w, rot_h, ok, reasons}
+    """
+    hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
+    orange_mask    = cv2.inRange(hsv, C.FLOOR_LOWER_ORANGE, C.FLOOR_UPPER_ORANGE)
+    thin_blue_line = _extract_thin_blue_line(hsv, bev_bgr.shape)
+
+    out: list[dict] = []
+    for source, mask in (("orange", orange_mask), ("blue", thin_blue_line)):
+        n, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        for i in range(1, n):
+            x, y, bw, bh, area = stats[i]
+
+            rot_w = rot_h = None
+            blob = (labels == i).astype(np.uint8) * 255
+            contours, _ = cv2.findContours(blob, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if contours:
+                (_, _), (rw, rh), _ = cv2.minAreaRect(max(contours, key=cv2.contourArea))
+                rot_w, rot_h = (min(rw, rh), max(rw, rh))  # (grosor, largo)
+
+            reasons = []
+            if bw < C.CORNER_LINE_MIN_WIDTH_PX:
+                reasons.append(f"bbox_w {bw}<{C.CORNER_LINE_MIN_WIDTH_PX}")
+            if bh > C.CORNER_LINE_MAX_HEIGHT_PX:
+                reasons.append(f"bbox_h {bh}>{C.CORNER_LINE_MAX_HEIGHT_PX}")
+            if area < C.CORNER_LINE_MIN_AREA_PX:
+                reasons.append(f"area {area}<{C.CORNER_LINE_MIN_AREA_PX}")
+
+            out.append({
+                "source": source, "x": int(x), "y": int(y), "w": int(bw), "h": int(bh),
+                "area": int(area), "cy": float(centroids[i][1]),
+                "rot_w": rot_w, "rot_h": rot_h,
+                "ok": not reasons, "reasons": reasons,
+            })
+    return out
+
 # ── Detección de centerline ───────────────────────────────────────────────────
 
 def detect_centerline(
