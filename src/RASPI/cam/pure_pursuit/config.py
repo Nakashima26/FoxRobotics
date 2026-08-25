@@ -211,6 +211,17 @@ LINE_FIT_MIN_POINTS  = 30   # pixeles mínimos en la banda para confiar en la pe
 # todavía no se estabilizó sobre datos reales de esta recta.
 TURN_RECOVERY_FRAMES = 10
 
+# ─── Pre-giro / pared interior (ACK ESP32: corner, dL, dR) ────────────────────
+# El rojo empuja a la DERECHA. Si ya vas pegado a la pared interior derecha
+# (o el ultrasonido empieza a "abrir" la esquina) y aún no ves naranja, ese
+# sesgo te mete al muro antes de girar. Aquí se atenúa bias WRO + far-hint.
+PRE_TURN_OPEN_CM       = 80     # dL/dR por encima → pre-esquina (ESP gira a 100)
+WALL_HUG_CM            = 28     # dL/dR por debajo → pegado a esa pared
+NEAR_CORNER_BIAS_SCALE = 0.15   # escala del sesgo WRO con corner/apertura
+HUG_BIAS_SCALE         = 0.25   # escala si abrazas la pared del lado de paso
+TURN_BLOCK_AHEAD_PX    = 140    # solo latas más cerca bloquean prio en pre-giro
+                                # (140 px ≈ 280 mm delante del robot en BEV)
+
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=35  →  obs=steer_deg/35
 # Cuando pp=0:  ESP32 usa visionSteerGain=80  (comportamiento V1 actual)

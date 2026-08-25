@@ -225,6 +225,7 @@ def _extract_thin_blue_line(hsv: np.ndarray, shape: tuple) -> np.ndarray:
 def detect_centerline(
     bev_bgr: np.ndarray,
     bev_obstacles: list[tuple[float, float, str]],
+    bias_scale: float = 1.0,
 ) -> list[tuple[int, int]]:
     """
     Detecta la línea central del corredor en la imagen BEV.
@@ -237,11 +238,15 @@ def detect_centerline(
     Parámetros:
       bev_bgr      : imagen BEV en BGR (BEV_W × BEV_H)
       bev_obstacles: lista de (bev_x, bev_y, color_str)  color_str = "Red"|"Green"
+      bias_scale   : 0..1 — atenúa el sesgo WRO (0 = solo inflación simétrica).
+                     Usar <1 cerca de esquina / pegado a la pared interior.
 
     Retorna lista de (x, y) en coordenadas BEV, ordenada de abajo (robot)
     hacia arriba (adelante).  Lista vacía si no hay suficiente piso visible.
     """
     h, w = bev_bgr.shape[:2]
+    bias_scale = float(max(0.0, min(1.0, bias_scale)))
+    bias_shift = int(round(C.OBS_BIAS_SHIFT * bias_scale))
 
     # ── 1. Máscara de piso ────────────────────────────────────────────────────
     hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
@@ -270,15 +275,16 @@ def detect_centerline(
         # Zona de seguridad simétrica alrededor del obstáculo
         cv2.circle(free_mask, (ix, iy), C.OBS_INFLATE_R, 0, -1)
 
-        # Sesgo asimétrico según reglas WRO de color
-        if color == "Red":
-            # Robot debe pasar por la DERECHA → bloquear más a la izquierda del bloque
-            cx_bias = ix - C.OBS_BIAS_SHIFT
-            cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
-        elif color == "Green":
-            # Robot debe pasar por la IZQUIERDA → bloquear más a la derecha del bloque
-            cx_bias = ix + C.OBS_BIAS_SHIFT
-            cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
+        # Sesgo asimétrico según reglas WRO de color (escalable en pre-giro)
+        if bias_shift > 0:
+            if color == "Red":
+                # Robot debe pasar por la DERECHA → bloquear más a la izquierda
+                cx_bias = ix - bias_shift
+                cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
+            elif color == "Green":
+                # Robot debe pasar por la IZQUIERDA → bloquear más a la derecha
+                cx_bias = ix + bias_shift
+                cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
 
     # ── 2b. Margen de seguridad contra CUALQUIER borde no-piso (pared incl.) ──
     # distanceTransform da, por pixel libre, la distancia al pixel no-libre
@@ -302,15 +308,16 @@ def detect_centerline(
 
         best_w = 0.0
         pass_cx: int | None = None
-        for ox, oy, color in bev_obstacles:
-            if color not in ("Red", "Green"):
-                continue
-            wgt = _ramp_weight(y, oy)
-            if wgt > best_w:
-                cx_side = _pass_side_cx(row, safe_mask[y, :], ox, color)
-                if cx_side is not None:
-                    best_w = wgt
-                    pass_cx = cx_side
+        if bias_scale > 0.0:
+            for ox, oy, color in bev_obstacles:
+                if color not in ("Red", "Green"):
+                    continue
+                wgt = _ramp_weight(y, oy) * bias_scale
+                if wgt > best_w:
+                    cx_side = _pass_side_cx(row, safe_mask[y, :], ox, color)
+                    if cx_side is not None:
+                        best_w = wgt
+                        pass_cx = cx_side
 
         if free_cx is None and pass_cx is None:
             # Sin hueco válido en esta fila: no dejar un vacío en el path —
