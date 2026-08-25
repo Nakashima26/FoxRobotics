@@ -42,7 +42,7 @@ from wro_runtime import (
 )
 
 from .bev import BEVTransformer
-from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
+from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug, detect_corner_line_y
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
@@ -199,11 +199,12 @@ class PPRuntime:
         serial_msg:   str,
         fps:          float,
         n_mem:        int,
+        n_mem_other:  int = 0,
     ):
         lines = [
             f"fps={fps:.1f}  pp={'ON' if pp_active else 'OFF'}  pts={n_path_pts}",
             f"steer={steer_deg:+.1f} deg  obs={obs_norm:+.3f}",
-            f"obs_R={len(positions.get('Red', []))}  obs_G={len(positions.get('Green', []))}  mem={n_mem}",
+            f"obs_R={len(positions.get('Red', []))}  obs_G={len(positions.get('Green', []))}  mem={n_mem}  other={n_mem_other}",
             f"tx: {serial_msg[:55]}",
         ]
         y = 22
@@ -279,6 +280,8 @@ class PPRuntime:
                 path_points   = []
                 bev_frame     = None
                 bev_obstacles = []
+                bev_obstacles_other = []
+                corner_line_y = None
                 pp_active     = False
                 pasado        = False
 
@@ -306,9 +309,16 @@ class PPRuntime:
                         if self._is_turning:
                             bev_obstacles = []
                         else:
-                            bev_obstacles = self.memory.update(
-                                new_obstacles, dt_s, self._last_heading
+                            corner_line_y = detect_corner_line_y(bev_frame)
+                            merged = self.memory.update(
+                                new_obstacles, dt_s, self._last_heading, corner_line_y
                             )
+                            # Separar "mi recta" (afecta centerline/PP/bloqueo
+                            # de esquina en el ESP32) de "siguiente recta"
+                            # (solo se recuerda, no debe hacer esquivar ni
+                            # bloquear el giro — ver ObstacleMemory._classify()).
+                            bev_obstacles       = [(x, y, c) for x, y, c, same in merged if same]
+                            bev_obstacles_other = [(x, y, c) for x, y, c, same in merged if not same]
                             # Evento de un solo frame: un obstáculo quedó detrás
                             # del robot recién en este update -> "ya lo pasé de
                             # verdad", no "dejé de verlo". Dispara RECUPERANDO.
@@ -395,12 +405,14 @@ class PPRuntime:
                 # ── Display ──────────────────────────────────────────────────
                 self._annotate(processed_frame, steer_deg, obs_norm,
                             pp_active, len(path_points), positions,
-                            serial_msg, fps, len(bev_obstacles))
+                            serial_msg, fps, len(bev_obstacles), len(bev_obstacles_other))
 
                 if bev_frame is not None:
                     bev_debug = draw_bev_debug(
                         bev_frame, path_points, lookahead_pt,
                         bev_obstacles, steer_deg, pp_active,
+                        corner_line_y=corner_line_y,
+                        bev_obstacles_other=bev_obstacles_other,
                     )
                     bev_h = processed_frame.shape[0]
                     bev_small = cv2.resize(bev_debug, (bev_h, bev_h))

@@ -220,6 +220,48 @@ def _extract_thin_blue_line(hsv: np.ndarray, shape: tuple) -> np.ndarray:
     thin_blue_line = cv2.bitwise_and(blue_wide, cv2.bitwise_not(not_line))
     return thin_blue_line
 
+
+def detect_corner_line_y(bev_bgr: np.ndarray) -> float | None:
+    """
+    Detecta la línea de límite de sección (naranja o azul, ver reglamento WRO)
+    más cercana al robot dentro del BEV, y retorna su Y en coordenadas BEV.
+
+    Se usa para clasificar cada obstáculo recordado (ObstacleMemory) como
+    "mi recta" (Y > línea, entre el robot y la esquina) o "siguiente recta"
+    (Y < línea, visto a través del hueco de la curva) — antes de esto,
+    centerline.py no distinguía y podía intentar esquivar un objeto que en
+    realidad estaba en la recta siguiente.
+
+    La línea naranja se toma directamente por color (no hay pared naranja
+    que confundir). La azul reutiliza _extract_thin_blue_line() para separar
+    la cinta delgada de la pared azul/gris gruesa. Ambos candidatos se filtran
+    por forma (ancho, delgado) para descartar ruido de color puntual.
+
+    Retorna None si no se encontró ningún blob con forma de línea este frame.
+    """
+    hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
+
+    orange_mask    = cv2.inRange(hsv, C.FLOOR_LOWER_ORANGE, C.FLOOR_UPPER_ORANGE)
+    thin_blue_line = _extract_thin_blue_line(hsv, bev_bgr.shape)
+    line_mask      = cv2.bitwise_or(orange_mask, thin_blue_line)
+
+    n, labels, stats, centroids = cv2.connectedComponentsWithStats(line_mask, connectivity=8)
+
+    best_y: float | None = None
+    for i in range(1, n):
+        x, y, bw, bh, area = stats[i]
+        if bw < C.CORNER_LINE_MIN_WIDTH_PX:
+            continue
+        if bh > C.CORNER_LINE_MAX_HEIGHT_PX:
+            continue
+        if area < C.CORNER_LINE_MIN_AREA_PX:
+            continue
+        cy = float(centroids[i][1])
+        if best_y is None or cy > best_y:   # la más cercana al robot (Y mayor)
+            best_y = cy
+
+    return best_y
+
 # ── Detección de centerline ───────────────────────────────────────────────────
 
 def detect_centerline(
@@ -350,6 +392,8 @@ def draw_bev_debug(
     bev_obstacles: list[tuple[float, float, str]],
     steer_deg: float = 0.0,
     pp_active: bool = False,
+    corner_line_y: float | None = None,
+    bev_obstacles_other: list[tuple[float, float, str]] | None = None,
 ) -> np.ndarray:
     """
     Dibuja sobre la imagen BEV:
@@ -359,10 +403,27 @@ def draw_bev_debug(
       - Posición del robot con flecha de heading
       - Círculo del radio look-ahead
       - Texto de estado
+      - Línea de esquina detectada (corner_line_y) y obstáculos clasificados
+        como "siguiente recta" (bev_obstacles_other), atenuados — solo para
+        depuración de la separación de pools (ver detect_corner_line_y()).
     """
     out = bev_bgr.copy()
 
-    # Obstáculos
+    # Línea de esquina detectada (debug de detect_corner_line_y)
+    if corner_line_y is not None:
+        ly = int(corner_line_y)
+        cv2.line(out, (0, ly), (out.shape[1] - 1, ly), (0, 165, 255), 2)
+        cv2.putText(out, "corner", (6, max(12, ly - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 165, 255), 1)
+
+    # Obstáculos clasificados como "siguiente recta" — atenuados, no bloquean
+    if bev_obstacles_other:
+        for ox, oy, color in bev_obstacles_other:
+            col_bgr = (0, 0, 90) if color == "Red" else (0, 90, 0)
+            cv2.circle(out, (int(ox), int(oy)), C.OBS_PHYSICAL_R_PX, col_bgr, 1)
+            cv2.circle(out, (int(ox), int(oy)), 3, col_bgr, -1)
+
+    # Obstáculos (mi recta — los que sí afectan centerline/PP)
     for ox, oy, color in bev_obstacles:
         col_bgr = (0, 0, 200) if color == "Red" else (0, 200, 0)
         cv2.circle(out, (int(ox), int(oy)), C.OBS_INFLATE_R,   col_bgr, 1)   # zona bloqueada

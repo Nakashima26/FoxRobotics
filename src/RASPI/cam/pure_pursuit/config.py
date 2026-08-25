@@ -162,6 +162,18 @@ OBS_MEM_DEDUPE_PX  = 40.0
 # bastante menos que esto.
 TURN_TIMEOUT_S = 3.0
 
+# ─── Línea de límite de sección (naranja/azul, ver reglamento WRO) ───────────
+# Usada para clasificar cada obstáculo recordado como "mi recta" (entre el
+# robot y la línea) vs. "siguiente recta" (visto a través del hueco de la
+# curva, más allá de la línea) — ver centerline.detect_corner_line_y() y
+# ObstacleMemory._classify(). Sin esto, centerline.py podía intentar esquivar
+# un objeto que en realidad está en la recta siguiente.
+# NOTA: valores de arranque sin calibrar en pista real — ajustar viendo
+# capturas de test_vision.py, igual que WALL_STRUCTURE_PX.
+CORNER_LINE_MIN_WIDTH_PX  = 60    # ancho mínimo del blob para contar como línea real (no ruido)
+CORNER_LINE_MAX_HEIGHT_PX = 40    # alto máximo — la línea es delgada transversalmente
+CORNER_LINE_MIN_AREA_PX   = 500   # área mínima adicional (evita motas alargadas por ruido)
+
 # ─── Hint direccional (obstáculo lejano, fuera de rango BEV) ─────────────────
 # Un objeto rojo/verde detectado en la imagen de cámara CRUDA (no en BEV) que
 # todavía no proyecta dentro del rango calibrado.  Se usa SOLO para empezar a
