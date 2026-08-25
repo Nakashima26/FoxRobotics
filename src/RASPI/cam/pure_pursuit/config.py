@@ -77,16 +77,16 @@ WALL_MARGIN_PX = 22
 FLOOR_LOWER = np.array([0, 0, 140])
 FLOOR_UPPER = np.array([35, 80, 255])
 
-FLOOR_LOWER_BLUE = np.array([95, 80, 80])
-FLOOR_UPPER_BLUE = np.array([125, 255, 255])
+FLOOR_LOWER_BLUE = np.array([95, 50, 10])
+FLOOR_UPPER_BLUE = np.array([150, 255, 220])
 
 FLOOR_LOWER_BLUE_WIDE = np.array([120, 30, 5])    # medido en pista real (ver [HSV banda debajo de naranja])
 FLOOR_UPPER_BLUE_WIDE = np.array([150, 200, 100])
 
 WALL_STRUCTURE_PX = 15   # <-- ajusta viendo tu imagen BEV real
 
-FLOOR_LOWER_ORANGE = np.array([5, 120, 120])
-FLOOR_UPPER_ORANGE = np.array([22, 255, 255])
+FLOOR_LOWER_ORANGE = np.array([1,  70, 130])
+FLOOR_UPPER_ORANGE = np.array([17, 160, 220])
 
 # Lista usada por centerline.py — agrega más tuplas aquí si detectas más
 # colores de piso que no quieres que bloqueen la ruta.
