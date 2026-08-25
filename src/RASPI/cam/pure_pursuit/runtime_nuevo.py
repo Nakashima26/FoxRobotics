@@ -43,7 +43,7 @@ from wro_runtime import (
 
 from .bev import BEVTransformer
 from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
-from .corner_lines import detect_lines
+from .corner_lines import OrangeLineTracker
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
@@ -112,6 +112,7 @@ class PPRuntime:
         self.controller = PurePursuitController()
         self.memory     = ObstacleMemory()
         self.far_hint   = FarHintManager()
+        self.line_tracker = OrangeLineTracker()
 
         # Estado de la memoria rodante
         self._last_heading: float | None = None
@@ -317,8 +318,10 @@ class PPRuntime:
                             pasado = self.memory.last_passed
 
                         # ── Línea de esquina naranja — solo identificación visual
-                        # por ahora, ver corner_lines.py.
-                        line_info = detect_lines(bev_frame)
+                        # por ahora, ver corner_lines.py. Usa el tracker con
+                        # persistencia (no detect_lines() cruda) para no "bailar"
+                        # entre el segmento ocluido y el despejado frame a frame.
+                        line_info = {"Orange": self.line_tracker.update(bev_frame)}
 
                         # ── DIAGNÓSTICO TEMPORAL: dirección de giro inferida por
                         # posición del obstáculo visto MÁS ALLÁ de la naranja
@@ -388,6 +391,7 @@ class PPRuntime:
                     if estado_now == "G" and self._prev_estado != "G":
                         # Empieza el giro físico -> vaciar YA y apagar la memoria.
                         self.memory.reset()
+                        self.line_tracker.reset()   # la línea ya quedó atrás, no aplica a la recta nueva
                         self._is_turning   = True
                         self._turn_start_t = now
                         print("[MEM] Giro detectado — memoria de obstáculos desactivada.", flush=True)

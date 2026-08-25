@@ -61,8 +61,65 @@ def detect_lines(bev_bgr: np.ndarray) -> dict:
 
     Azul se quitó de la ecuación (daba muchos falsos positivos/negativos y
     no era confiable) — por ahora solo se seguirá la línea naranja.
+
+    Lectura CRUDA de un solo frame — brinca entre un segmento cercano
+    parcialmente ocluido por un obstáculo (a veces cruza LINE_MIN_RUN_PX,
+    a veces no, por un par de pixeles de diferencia frame a frame) y el
+    siguiente segmento realmente visible más lejos. Para uso en el
+    runtime real, usar OrangeLineTracker (abajo), que suaviza esto en
+    el tiempo.
     """
     hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
     mask = _line_mask(hsv, C.LINE_ORANGE_HSV)
     near_y = _find_near_line_row(mask, C.LINE_MIN_RUN_PX)
     return {"Orange": {"seen": near_y is not None, "near_y": near_y}}
+
+
+class OrangeLineTracker:
+    """
+    Suaviza detect_lines() en el tiempo.
+
+    La lectura cruda de un solo frame puede "brincar" entre dos segmentos
+    reales distintos (uno cercano parcialmente ocluido por un obstáculo,
+    otro más lejos y despejado) de un frame a otro — confirmado en pista:
+    la Y reportada saltaba entre "muy pegada al obstáculo" y "bien
+    separada" sin que el robot se moviera lo suficiente para justificarlo.
+
+    En vez de confiar en la lectura de un solo frame, exige que una nueva
+    lectura (mismo 'seen' y near_y dentro de una tolerancia) se repita
+    PERSIST_FRAMES seguidos antes de aceptarla como el estado "real" — un
+    brinco de un solo frame no alcanza a mover el valor reportado.
+    """
+
+    def __init__(self, persist_frames: int = 3, tolerance_px: float = 15.0):
+        self.persist_frames = persist_frames
+        self.tolerance_px = tolerance_px
+        self.stable: dict = {"seen": False, "near_y": None}
+        self._candidate: dict | None = None
+        self._candidate_count = 0
+
+    def reset(self):
+        self.stable = {"seen": False, "near_y": None}
+        self._candidate = None
+        self._candidate_count = 0
+
+    def _matches_candidate(self, raw: dict) -> bool:
+        if self._candidate is None or raw["seen"] != self._candidate["seen"]:
+            return False
+        if not raw["seen"]:
+            return True
+        return abs(raw["near_y"] - self._candidate["near_y"]) <= self.tolerance_px
+
+    def update(self, bev_bgr: np.ndarray) -> dict:
+        raw = detect_lines(bev_bgr)["Orange"]
+
+        if self._matches_candidate(raw):
+            self._candidate_count += 1
+        else:
+            self._candidate = raw
+            self._candidate_count = 1
+
+        if self._candidate_count >= self.persist_frames:
+            self.stable = self._candidate
+
+        return self.stable
