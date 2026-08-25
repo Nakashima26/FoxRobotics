@@ -350,6 +350,7 @@ def draw_bev_debug(
     bev_obstacles: list[tuple[float, float, str]],
     steer_deg: float = 0.0,
     pp_active: bool = False,
+    line_info: dict | None = None,
 ) -> np.ndarray:
     """
     Dibuja sobre la imagen BEV:
@@ -359,8 +360,27 @@ def draw_bev_debug(
       - Posición del robot con flecha de heading
       - Círculo del radio look-ahead
       - Texto de estado
+      - Líneas de esquina (line_info, ver corner_lines.detect_lines()) — una
+        barra horizontal completa por color en su Y detectada, tal como se
+        ve en corner_lines.py/config.LINE_*.
     """
     out = bev_bgr.copy()
+
+    # Líneas de esquina
+    if line_info:
+        h, w = out.shape[:2]
+        y_txt = 58
+        for color, col_bgr in (("Orange", (0, 140, 255)), ("Blue", (255, 120, 0))):
+            info = line_info.get(color, {"seen": False, "near_y": None})
+            if info["seen"]:
+                ny = int(info["near_y"])
+                cv2.line(out, (0, ny), (w, ny), col_bgr, 2)          # dónde está la línea
+                close = (C.ROBOT_BEV_Y - ny) <= C.LINE_PROXIMITY_PX
+                txt = f"{color}: y={ny}" + ("  CERCA" if close else "")
+            else:
+                txt = f"{color}: no visto"
+            cv2.putText(out, txt, (6, y_txt), cv2.FONT_HERSHEY_SIMPLEX, 0.42, col_bgr, 1)
+            y_txt += 18
 
     # Obstáculos
     for ox, oy, color in bev_obstacles:

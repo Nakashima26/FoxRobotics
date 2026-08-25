@@ -173,6 +173,21 @@ FAR_HINT_KP          = 0.015   # ganancia proporcional: grados por px de offset
 FAR_HINT_KD          = 0.004   # ganancia derivativa: amortigua saltos por ruido de detección
 CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
 
+# ─── Líneas de esquina (naranja/azul, ver reglamento WRO) — corner_lines.py ───
+# Marcadores FÍSICOS FIJOS del tapete, en cada esquina. Recuperado del
+# historial (commit 2ab26e2, revertido junto con un intento incompleto de
+# disparo de giro — la detección en sí funcionaba). Naranja reutiliza el
+# umbral ya confirmado hoy (FLOOR_LOWER/UPPER_ORANGE); azul usa el rango
+# medido en pista real hoy (ver [HSV banda debajo de naranja] en
+# runtime_nuevo.py) — los valores originales de este archivo nunca se
+# calibraron contra el tapete real.
+LINE_ORANGE_HSV = [(FLOOR_LOWER_ORANGE, FLOOR_UPPER_ORANGE)]
+LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]
+
+LINE_MIN_PIXELS   = 40   # píxeles mínimos en BEV para considerar "veo la línea"
+LINE_PROXIMITY_PX = 60   # si el punto más cercano de la línea está a esta
+                          # distancia (o menos) del robot en Y-BEV, cuenta como "cerca"
+
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=35  →  obs=steer_deg/35
 # Cuando pp=0:  ESP32 usa visionSteerGain=80  (comportamiento V1 actual)

@@ -43,6 +43,7 @@ from wro_runtime import (
 
 from .bev import BEVTransformer
 from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
+from .corner_lines import detect_lines
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
@@ -281,6 +282,8 @@ class PPRuntime:
                 bev_obstacles = []
                 pp_active     = False
                 pasado        = False
+                line_info     = {"Orange": {"seen": False, "near_y": None},
+                                  "Blue":   {"seen": False, "near_y": None}}
 
                 if self.bev.is_calibrated:
                     try:
@@ -313,6 +316,10 @@ class PPRuntime:
                             # del robot recién en este update -> "ya lo pasé de
                             # verdad", no "dejé de verlo". Dispara RECUPERANDO.
                             pasado = self.memory.last_passed
+
+                        # ── Líneas de esquina (naranja/azul) — solo identificación
+                        # visual por ahora, ver corner_lines.py.
+                        line_info = detect_lines(bev_frame)
 
                         # Detectar centerline (con obstáculos recordados+nuevos)
                         path_points = detect_centerline(bev_frame, bev_obstacles)
@@ -391,6 +398,8 @@ class PPRuntime:
                     log_line += f" | RX: {serial_ack}"
                 print(log_line, flush=True)
 
+                print(f"[LINEA] Orange={line_info['Orange']}  Blue={line_info['Blue']}", flush=True)
+
                 
                 # ── Display ──────────────────────────────────────────────────
                 self._annotate(processed_frame, steer_deg, obs_norm,
@@ -401,6 +410,7 @@ class PPRuntime:
                     bev_debug = draw_bev_debug(
                         bev_frame, path_points, lookahead_pt,
                         bev_obstacles, steer_deg, pp_active,
+                        line_info=line_info,
                     )
                     bev_h = processed_frame.shape[0]
                     bev_small = cv2.resize(bev_debug, (bev_h, bev_h))
