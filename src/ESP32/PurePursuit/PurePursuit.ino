@@ -587,16 +587,12 @@ void loop() {
 
       controlPID(distL, distR);
 
-      // No girar si hay obstáculo activo en Pi, EXCEPTO:
-      //   1) piInteriorPass: el paso interior coincide con el giro de pista
-      //      (el giro mismo resuelve el esquive).
-      //   2) apertura ultrasónica: la esquina ya "abrió" — si seguimos
-      //      centrando un rojo lejano pegados a la pared interior, chocamos.
-      bool aperturaEsquina = (distL > umbralPared) || (distR > umbralPared);
+      // No girar si hay obstáculo activo en Pi, EXCEPTO piInteriorPass
+      // (paso interior = el giro mismo resuelve el esquive). La apertura
+      // ultrasónica ya no anula prio=1 — solo intr=1 libera el giro.
       bool bloqueadoPorObstaculo =
           (piPriority || (piMemoryFrames > 0))
-          && !piInteriorPass
-          && !aperturaEsquina;
+          && !piInteriorPass;
 
       if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo

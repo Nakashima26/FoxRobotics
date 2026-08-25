@@ -178,15 +178,6 @@ def _bias_scale_for_preturn(
     return 1.0, False, "ok"
 
 
-def _has_close_obstacle(bev_obstacles: list[tuple[float, float, str]]) -> bool:
-    """True si hay una lata lo bastante cerca como para bloquear el giro."""
-    for _, oy, _ in bev_obstacles:
-        ahead = C.ROBOT_BEV_Y - float(oy)
-        if 0.0 <= ahead <= C.TURN_BLOCK_AHEAD_PX:
-            return True
-    return False
-
-
 class PPRuntime:
     """
     Runtime Pure Pursuit con memoria de obstáculos.
@@ -474,11 +465,8 @@ class PPRuntime:
 
                         # Interior/exterior: rojo+giro-derecha o verde+giro-izquierda
                         # → el giro resuelve el paso (intr=1, ESP no bloquea).
-                        # Cuenta latas en BEV y lejanas en cámara (far_objects).
-                        colors_present = (
-                            {c for _, _, c in bev_obstacles}
-                            | {c for *_, c in far_objects}
-                        )
+                        # Solo latas proyectadas en BEV (no far_objects lejanos).
+                        colors_present = {c for _, _, c in bev_obstacles}
                         interior = False
                         if turn_dir is not None and colors_present:
                             if "Green" in colors_present and is_interior_pass(turn_dir, "Green"):
@@ -538,14 +526,9 @@ class PPRuntime:
                 # Sin línea válida → recto (obs=0).
                 state = "pp_follow" if pp_active else "no_path"
 
-                # En pre-giro solo latas cercanas bloquean el giro del ESP32.
-                near_preturn = self._preturn_reason != "ok"
-                if near_preturn:
-                    block_turn = _has_close_obstacle(bev_obstacles)
-                    mem_report = len(bev_obstacles) if block_turn else 0
-                else:
-                    block_turn = len(bev_obstacles) > 0
-                    mem_report = len(bev_obstacles)
+                # Bloquear giro si hay lata en BEV; solo intr=1 libera en ESP32.
+                block_turn = len(bev_obstacles) > 0 and not interior
+                mem_report = len(bev_obstacles)
 
                 # ── Construir y enviar mensaje serial ────────────────────────
                 serial_msg = self._build_serial_message(
