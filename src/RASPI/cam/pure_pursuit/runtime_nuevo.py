@@ -284,6 +284,7 @@ class PPRuntime:
                 pp_active     = False
                 pasado        = False
                 line_info     = {"Orange": {"seen": False, "near_y": None}}
+                bev_obstacles_beyond = []
 
                 if self.bev.is_calibrated:
                     try:
@@ -317,34 +318,44 @@ class PPRuntime:
                             # verdad", no "dejé de verlo". Dispara RECUPERANDO.
                             pasado = self.memory.last_passed
 
-                        # ── Línea de esquina naranja — solo identificación visual
-                        # por ahora, ver corner_lines.py. Usa el tracker con
-                        # persistencia (no detect_lines() cruda) para no "bailar"
-                        # entre el segmento ocluido y el despejado frame a frame.
+                        # ── Línea de esquina naranja — ver corner_lines.py. Usa
+                        # el tracker con persistencia (no detect_lines() cruda)
+                        # para no "bailar" entre el segmento ocluido y el
+                        # despejado frame a frame.
                         line_info = {"Orange": self.line_tracker.update(bev_frame)}
+
+                        # ── Filtrar obstáculos MÁS ALLÁ de la naranja: no deben
+                        # esquivarse todavía (están en la siguiente recta, no en
+                        # la mía) — antes de esto, detect_centerline() los
+                        # mezclaba con los reales y armaba rutas en zigzag
+                        # intentando satisfacer el lado de paso de un obstáculo
+                        # que ni siquiera es alcanzable aún. Sin línea visible,
+                        # no se filtra nada (mismo comportamiento de siempre).
+                        bev_obstacles_beyond = []
+                        orange_info = line_info["Orange"]
+                        if orange_info["seen"]:
+                            bev_obstacles_mine = []
+                            for o in bev_obstacles:
+                                if self.line_tracker.classify(
+                                    o[0], o[1], C.ROBOT_BEV_X, C.ROBOT_BEV_Y
+                                ) is False:
+                                    bev_obstacles_beyond.append(o)
+                                else:
+                                    bev_obstacles_mine.append(o)
+                            bev_obstacles = bev_obstacles_mine
 
                         # ── DIAGNÓSTICO TEMPORAL: dirección de giro inferida por
                         # posición del obstáculo visto MÁS ALLÁ de la naranja
                         # (su lado izq/der respecto al centro del robot). Solo
                         # imprime — todavía no cambia ningún comportamiento.
-                        orange_info = line_info["Orange"]
-                        if orange_info["seen"]:
-                            # classify() usa la recta CON pendiente cuando se
-                            # pudo ajustar (no solo comparar Y) — ver
-                            # OrangeLineTracker.classify() en corner_lines.py.
-                            beyond = [
-                                o for o in bev_obstacles
-                                if self.line_tracker.classify(
-                                    o[0], o[1], C.ROBOT_BEV_X, C.ROBOT_BEV_Y
-                                ) is False
-                            ]
-                            if beyond:
-                                ox0 = beyond[0][0]
-                                dir_guess = "DERECHA" if ox0 > C.ROBOT_BEV_X else "IZQUIERDA"
-                                print(f"[DIR] obstáculo después de naranja en x={ox0:.0f} "
-                                      f"(centro={C.ROBOT_BEV_X}) -> giro {dir_guess}", flush=True)
+                        if bev_obstacles_beyond:
+                            ox0 = bev_obstacles_beyond[0][0]
+                            dir_guess = "DERECHA" if ox0 > C.ROBOT_BEV_X else "IZQUIERDA"
+                            print(f"[DIR] obstáculo después de naranja en x={ox0:.0f} "
+                                  f"(centro={C.ROBOT_BEV_X}) -> giro {dir_guess}", flush=True)
 
-                        # Detectar centerline (con obstáculos recordados+nuevos)
+                        # Detectar centerline (con obstáculos recordados+nuevos,
+                        # ya sin los que quedaron más allá de la naranja)
                         path_points = detect_centerline(bev_frame, bev_obstacles)
 
                         if len(path_points) >= C.MIN_PATH_PTS:
@@ -435,6 +446,7 @@ class PPRuntime:
                         bev_frame, path_points, lookahead_pt,
                         bev_obstacles, steer_deg, pp_active,
                         line_info=line_info,
+                        bev_obstacles_beyond=bev_obstacles_beyond,
                     )
                     bev_h = processed_frame.shape[0]
                     bev_small = cv2.resize(bev_debug, (bev_h, bev_h))

@@ -351,6 +351,7 @@ def draw_bev_debug(
     steer_deg: float = 0.0,
     pp_active: bool = False,
     line_info: dict | None = None,
+    bev_obstacles_beyond: list[tuple[float, float, str]] | None = None,
 ) -> np.ndarray:
     """
     Dibuja sobre la imagen BEV:
@@ -391,7 +392,14 @@ def draw_bev_debug(
             cv2.putText(out, txt, (6, y_txt), cv2.FONT_HERSHEY_SIMPLEX, 0.42, col_bgr, 1)
             y_txt += 18
 
-    # Obstáculos
+    # Obstáculos más allá de la naranja — atenuados, NO entran a detect_centerline()
+    if bev_obstacles_beyond:
+        for ox, oy, color in bev_obstacles_beyond:
+            col_bgr = (0, 0, 90) if color == "Red" else (0, 90, 0)
+            cv2.circle(out, (int(ox), int(oy)), C.OBS_PHYSICAL_R_PX, col_bgr, 1)
+            cv2.circle(out, (int(ox), int(oy)), 3, col_bgr, -1)
+
+    # Obstáculos (mi recta — los que sí afectan centerline/PP)
     for ox, oy, color in bev_obstacles:
         col_bgr = (0, 0, 200) if color == "Red" else (0, 200, 0)
         cv2.circle(out, (int(ox), int(oy)), C.OBS_INFLATE_R,   col_bgr, 1)   # zona bloqueada
