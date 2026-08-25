@@ -329,7 +329,15 @@ class PPRuntime:
                         # imprime — todavía no cambia ningún comportamiento.
                         orange_info = line_info["Orange"]
                         if orange_info["seen"]:
-                            beyond = [o for o in bev_obstacles if o[1] < orange_info["near_y"]]
+                            # classify() usa la recta CON pendiente cuando se
+                            # pudo ajustar (no solo comparar Y) — ver
+                            # OrangeLineTracker.classify() en corner_lines.py.
+                            beyond = [
+                                o for o in bev_obstacles
+                                if self.line_tracker.classify(
+                                    o[0], o[1], C.ROBOT_BEV_X, C.ROBOT_BEV_Y
+                                ) is False
+                            ]
                             if beyond:
                                 ox0 = beyond[0][0]
                                 dir_guess = "DERECHA" if ox0 > C.ROBOT_BEV_X else "IZQUIERDA"

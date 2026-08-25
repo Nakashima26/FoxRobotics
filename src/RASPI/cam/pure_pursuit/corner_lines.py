@@ -53,6 +53,50 @@ def _find_near_line_row(mask: np.ndarray, min_run_px: int) -> float | None:
     return None
 
 
+def _fit_line_near(mask: np.ndarray, near_y: float, band_px: float,
+                    min_points: int) -> tuple[float, float, float, float] | None:
+    """
+    Ajusta una recta (vx, vy, x0, y0) a los pixeles de la máscara dentro de
+    una banda de +-band_px alrededor de near_y, cubriendo todo el ancho de
+    la imagen — a diferencia de _find_near_line_row(), que solo mira una
+    fila, esto junta pixeles de varias filas para poder estimar la
+    PENDIENTE real de la línea (puede venir inclinada, no necesariamente
+    horizontal).
+
+    Retorna None si no hay suficientes pixeles en la banda (línea muy
+    ocluida/fragmentada ahí) — en ese caso, quien llame debe usar un
+    fallback horizontal en near_y en vez de una recta con pendiente.
+    """
+    h = mask.shape[0]
+    y0b = max(0, int(near_y - band_px))
+    y1b = min(h, int(near_y + band_px) + 1)
+    band = mask[y0b:y1b, :]
+    ys, xs = np.where(band > 0)
+    if len(xs) < min_points:
+        return None
+    pts = np.column_stack([xs.astype(np.float32), (ys + y0b).astype(np.float32)])
+    vx, vy, x0, y0 = cv2.fitLine(pts, cv2.DIST_L2, 0, 0.01, 0.01).flatten()
+    return float(vx), float(vy), float(x0), float(y0)
+
+
+def line_side_is_near(px: float, py: float,
+                       line_params: tuple[float, float, float, float],
+                       ref_x: float, ref_y: float) -> bool:
+    """
+    True si el punto (px, py) está del MISMO lado de la recta (vx,vy,x0,y0)
+    que el punto de referencia (ref_x, ref_y) — normalmente el robot, cuyo
+    lado por definición es "antes de la línea" (mi recta).
+
+    Usa el signo del producto cruzado (dirección de la recta) x (vector al
+    punto) — no importa la orientación de (vx,vy) que devuelva cv2.fitLine
+    porque el signo se calibra contra la referencia, no contra un eje fijo.
+    """
+    vx, vy, x0, y0 = line_params
+    cross_ref = vx * (ref_y - y0) - vy * (ref_x - x0)
+    cross_pt  = vx * (py - y0) - vy * (px - x0)
+    return (cross_ref >= 0) == (cross_pt >= 0)
+
+
 def detect_lines(bev_bgr: np.ndarray) -> dict:
     """
     Retorna {'seen': bool, 'near_y': float|None} para la línea naranja.
@@ -94,12 +138,12 @@ class OrangeLineTracker:
     def __init__(self, persist_frames: int = 3, tolerance_px: float = 15.0):
         self.persist_frames = persist_frames
         self.tolerance_px = tolerance_px
-        self.stable: dict = {"seen": False, "near_y": None}
+        self.stable: dict = {"seen": False, "near_y": None, "line": None}
         self._candidate: dict | None = None
         self._candidate_count = 0
 
     def reset(self):
-        self.stable = {"seen": False, "near_y": None}
+        self.stable = {"seen": False, "near_y": None, "line": None}
         self._candidate = None
         self._candidate_count = 0
 
@@ -120,6 +164,36 @@ class OrangeLineTracker:
             self._candidate_count = 1
 
         if self._candidate_count >= self.persist_frames:
-            self.stable = self._candidate
+            self.stable = dict(self._candidate)
+            if self.stable["seen"]:
+                # Ajusta la recta (con pendiente) SOLO una vez que near_y ya
+                # es estable — así el ancla de la banda no "baila" también.
+                hsv  = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
+                mask = _line_mask(hsv, C.LINE_ORANGE_HSV)
+                self.stable["line"] = _fit_line_near(
+                    mask, self.stable["near_y"],
+                    C.LINE_FIT_BAND_PX, C.LINE_FIT_MIN_POINTS,
+                )
+            else:
+                self.stable["line"] = None
 
         return self.stable
+
+    def classify(self, ox: float, oy: float, robot_x: float, robot_y: float) -> bool | None:
+        """
+        True si (ox, oy) está del mismo lado que el robot (antes de la
+        línea, mi recta); False si está del otro lado (siguiente recta).
+        None si no hay línea estable todavía (no se puede clasificar).
+
+        Usa la recta con pendiente cuando se pudo ajustar (self.stable["line"]);
+        si no hubo suficientes pixeles para ajustarla (línea muy ocluida/corta
+        en este momento), cae de vuelta a comparar solo Y contra near_y —
+        funciona igual de bien que antes cuando la línea SÍ es horizontal,
+        y es mejor que no clasificar nada.
+        """
+        if not self.stable["seen"]:
+            return None
+        line = self.stable["line"]
+        if line is not None:
+            return line_side_is_near(ox, oy, line, robot_x, robot_y)
+        return oy > self.stable["near_y"]

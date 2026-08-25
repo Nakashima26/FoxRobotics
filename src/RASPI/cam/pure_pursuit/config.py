@@ -194,6 +194,15 @@ LINE_MIN_RUN_PX   = 8   # ancho mínimo de corrida CONTIGUA en una fila para
 LINE_PROXIMITY_PX = 60   # si el punto más cercano de la línea está a esta
                           # distancia (o menos) del robot en Y-BEV, cuenta como "cerca"
 
+# Ajuste de recta CON PENDIENTE (no solo Y) una vez que near_y ya es estable
+# — ver corner_lines._fit_line_near()/OrangeLineTracker. Necesario porque la
+# línea puede verse inclinada/diagonal en el BEV, no necesariamente horizontal;
+# comparar solo Y contra un obstáculo puede clasificarlo mal si está a una X
+# distinta de por donde se ancló la lectura.
+LINE_FIT_BAND_PX     = 60   # +-px alrededor de near_y de donde se toman pixeles para el ajuste
+LINE_FIT_MIN_POINTS  = 30   # pixeles mínimos en la banda para confiar en la pendiente ajustada;
+                             # si no alcanza, se usa el fallback horizontal (solo Y) de siempre
+
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=35  →  obs=steer_deg/35
 # Cuando pp=0:  ESP32 usa visionSteerGain=80  (comportamiento V1 actual)
