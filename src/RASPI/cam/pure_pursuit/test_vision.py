@@ -9,8 +9,6 @@ USO:
 CONTROLES:
   ESC   : salir
   S     : guardar captura del frame actual como bev_snapshot.jpg
-  D     : activar/desactivar debug de vision.py (imprime por qué se rechaza
-          cada candidato Red/Green -- máscara HSV vacía vs filtro de forma)
 """
 
 import argparse
@@ -62,11 +60,10 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
 
     print("[TEST] ESC para salir | S para guardar snapshot", flush=True)
 
-    loop        = 0
-    fps         = 0.0
-    t_last      = time.perf_counter()
-    fps_count   = 0
-    vision_debug = False
+    loop      = 0
+    fps       = 0.0
+    t_last    = time.perf_counter()
+    fps_count = 0
 
     while True:
         ret, frame = cap.read()
@@ -86,7 +83,7 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
             t_last  = now
 
         # ── Detección de obstáculos ───────────────────────────────────────────
-        processed, positions = vision.process_frame(frame, debug=vision_debug)
+        processed, positions = vision.process_frame(frame)
 
         if not bev.is_calibrated:
             cv2.putText(processed, "Sin calibracion BEV corre calibrate.py",
@@ -156,10 +153,6 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
             fname = f"bev_snapshot_{loop:04d}.jpg"
             cv2.imwrite(fname, combined)
             print(f"[TEST] Guardado: {fname}", flush=True)
-        if key == ord('d') or key == ord('D'):
-            vision_debug = not vision_debug
-            print(f"[TEST] Vision debug: {'ON' if vision_debug else 'OFF'} "
-                  f"(imprime por qué se rechaza cada candidato Red/Green)", flush=True)
 
     cap.release()
     cv2.destroyAllWindows()

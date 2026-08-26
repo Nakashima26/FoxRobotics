@@ -53,7 +53,7 @@ class Vision:
 
         self.kernel = np.ones((3, 3), np.uint8)
 
-    def process_color(self, frame, mask, color_name, debug=False):
+    def process_color(self, frame, mask, color_name):
         """Encuentra contornos y devuelve posiciones.
 
         Filtra por solidez (area_contorno / area_bbox) para descartar formas
@@ -61,19 +61,8 @@ class Vision:
         solidez baja. Una lata se ve como un blob compacto → solidez alta.
         Ademas descarta bounding boxes con aspect ratio extremo (muy
         anchos/planos), típico de una línea diagonal o casi horizontal.
-
-        debug=True imprime por qué se rechazó cada candidato (para diagnosticar
-        un frame donde a simple vista SÍ hay color pero no se detecta nada):
-        pixeles totales de máscara, o área/solidez/aspecto de cada contorno
-        descartado — así se ve si el problema es el rango HSV (máscara casi
-        vacía) o el filtro de forma (contorno cortado por el borde del frame,
-        deformado por blur de movimiento, etc).
         """
-        n_mask_px = np.count_nonzero(mask)
-        if n_mask_px < 500:
-            if debug:
-                print(f"[VISION] {color_name}: máscara casi vacía ({n_mask_px}px < 500) "
-                      f"-> rango HSV no matcheó nada, no llega ni a buscar contornos", flush=True)
+        if np.count_nonzero(mask) < 500:
             return []
 
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel)
@@ -86,8 +75,6 @@ class Vision:
         for cnt in contours:
             area = cv2.contourArea(cnt)
             if area <= 1000:
-                if debug and area > 50:
-                    print(f"[VISION] {color_name}: contorno descartado, area={area:.0f} <= 1000", flush=True)
                 continue
 
             x, y, w, h = cv2.boundingRect(cnt)
@@ -96,10 +83,6 @@ class Vision:
             aspect = max(w, h) / max(1, min(w, h))
 
             if solidity < MIN_SOLIDITY or aspect > MAX_ASPECT:
-                if debug:
-                    print(f"[VISION] {color_name}: contorno descartado en ({x},{y},{w},{h}) "
-                          f"area={area:.0f} solidity={solidity:.2f} (min {MIN_SOLIDITY}) "
-                          f"aspect={aspect:.2f} (max {MAX_ASPECT})", flush=True)
                 continue
 
             objects.append((x, y, w, h))
@@ -108,19 +91,14 @@ class Vision:
 
         return objects
 
-    def process_frame(self, frame, debug=False):
-        """Detecta colores optimizado con NumPy.
-
-        debug=True propaga a process_color() -- ver ahí para el detalle de
-        qué imprime (útil para diagnosticar un frame donde a simple vista SÍ
-        hay color pero no se detectó nada).
-        """
+    def process_frame(self, frame):
+        """Detecta colores optimizado con NumPy."""
         frame = cv2.flip(frame, 1)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         masks = {color: np.bitwise_or.reduce([cv2.inRange(hsv, lower, upper) for lower, upper in ranges])
                  for color, ranges in self.color_ranges.items()}
 
-        positions = {color: self.process_color(frame, mask, color, debug=debug) for color, mask in masks.items()}
+        positions = {color: self.process_color(frame, mask, color) for color, mask in masks.items()}
 
         return frame, positions
