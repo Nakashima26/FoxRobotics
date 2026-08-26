@@ -89,10 +89,6 @@ bool  piInteriorPass = false; // intr=1: el obstáculo actual se pasa por el mis
                                // sabe la dirección de giro, por visión, y el color
                                // del obstáculo) — el giro mismo resuelve el paso,
                                // no hace falta seguir bloqueando detectarEsquina().
-bool  piTargetVisible = false; // tgt=1: durante GIRANDO, la Pi ya ve el próximo
-                               // obstáculo con una posición BEV válida — pide
-                               // cortar el giro ya y tomar el control por visión
-                               // en vez de terminar los AngGiro grados a ciegas.
 bool  piReady      = false;
 
 unsigned long lastPiMsgMs = 0;
@@ -308,20 +304,6 @@ void parsePiMessage(String line) {
       piInteriorPass = (s.toInt() != 0);
     } else {
       piInteriorPass = false;
-    }
-
-    // tgt — la Pi ve, DURANTE el giro (estado==GIRANDO), un rojo/verde que ya
-    // proyectó a una posición BEV válida (dentro del área calibrada de piso).
-    // Solo tiene sentido mientras se está girando (ver case GIRANDO) — ahí
-    // sirve como pedido de "corta el giro, ya lo veo, te tomo el control".
-    // Ausente en V1 → false por defecto.
-    idx = line.indexOf("tgt=");
-    if (idx >= 0) {
-      int end = line.indexOf(',', idx);
-      String s = (end >= 0) ? line.substring(idx + 4, end) : line.substring(idx + 4);
-      piTargetVisible = (s.toInt() != 0);
-    } else {
-      piTargetVisible = false;
     }
 
     piReady     = true;
@@ -656,15 +638,7 @@ void loop() {
       setMotor(velocidadMotor);
       escribirServo(direccionIzquierda ? 150 : 20);
 
-      bool doneNormal = delta >= AngGiro;
-      // Corte anticipado por visión: la Pi ya ve el próximo obstáculo con
-      // una posición BEV válida — eso solo pasa si el chasis ya giró lo
-      // suficiente para que ese objeto caiga dentro del área calibrada de
-      // piso (mirando hacia adelante), así que no hace falta un umbral de
-      // grados aparte: la propia geometría de bev_in_bounds ya lo exige.
-      bool doneByVision = piTargetVisible;
-
-      if (doneNormal || doneByVision) {
+      if (delta >= AngGiro) {
         escribirServo(centroServo);
         velocidadMotor = 180;
 
@@ -672,20 +646,7 @@ void loop() {
         integralWall = 0; prevErrorWall = 0;
         integralGyro = 0; prevErrorGyro = 0;
 
-        if (doneNormal) {
-          anguloObjetivo = anguloGyro;
-        } else {
-          // Corte a medias: anguloGyro todavía no llegó a AngGiro. El
-          // heading FINAL de esta recta sigue siendo el mismo de siempre
-          // (AngGiro grados desde que empezó el giro) — lo que falta se
-          // suma una sola vez aquí, en la MISMA dirección en la que ya
-          // venía girando. De ahí en adelante, SIGUIENDO/esquiva/RECUPERANDO
-          // corren normal (el PID de gyro ya compara contra este objetivo
-          // fijo sin importar cuánto se desvíe la maniobra de esquiva).
-          float deficit = AngGiro - delta;
-          anguloObjetivo = anguloGyro + (anguloGyro < 0 ? -deficit : deficit);
-        }
-
+        anguloObjetivo = anguloGyro;
         lastTurnTime   = millis();
         estado         = SIGUIENDO;
         turnsCompleted++;
@@ -694,7 +655,7 @@ void loop() {
           raceFinished = true;
         }
 
-        Serial.print(doneByVision ? "Giro cortado por vision " : "Giro completado ");
+        Serial.print("Giro completado ");
         Serial.print(turnsCompleted);
         Serial.print("/");
         Serial.println(TURNS_PER_RACE);
@@ -718,7 +679,6 @@ void loop() {
   Serial.print(" | prio:");     Serial.print(piPriority ? 1 : 0);
   Serial.print(" | mem:");      Serial.print(piMemoryFrames);
   Serial.print(" | intr:");     Serial.print(piInteriorPass ? 1 : 0);
-  Serial.print(" | tgt:");      Serial.print(piTargetVisible ? 1 : 0);
   Serial.print(" | giros:");    Serial.print(turnsCompleted);
   Serial.print("/");            Serial.println(TURNS_PER_RACE);
 }
