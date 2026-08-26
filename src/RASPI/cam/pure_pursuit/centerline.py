@@ -376,18 +376,21 @@ def detect_centerline(
 
             # Fila SIN NADA de piso detectado (viendo la pared casi de frente
             # / ángulo muy oblicuo — dist.max()==0 significa que ni siquiera
-            # hay un pixel libre en toda la fila). En vez de dejar un hueco y
-            # arriesgar quedarnos sin suficientes puntos (path descartado,
-            # "no_path"), extendemos la curvatura que YA se detectó cerca del
-            # robot: si los últimos dos puntos venían doblando hacia el piso
-            # libre, seguimos esa misma tendencia hacia adelante en vez de
-            # asumir que no hay camino. Se autocorrige el siguiente frame en
-            # cuanto el robot avanza y hay piso real que detectar de nuevo.
-            if len(points) >= 2:
-                (x1, _y1), (x2, _y2) = points[-2], points[-1]
-                cx_extrap = x2 + (x2 - x1)
-                points.append((float(np.clip(cx_extrap, 0, w - 1)), y))
-                weights.append(best_w)
+            # hay un pixel libre en toda la fila, no hay CÓMO saber dónde
+            # está el hueco a esta distancia específica). Lo que sí se sabe:
+            # el piso real más cercano al robot ya se estaba abriendo hacia
+            # un lado — comprometerse a ESE lado con máxima urgencia
+            # (weight=1.0, mismo mecanismo que ya relaja _limit_lateral_step
+            # para latas) en vez de una extrapolación tibia a ritmo normal.
+            # Esto es un giro decidido, no un intento de adivinar un camino
+            # recto que en realidad no existe. Se autocorrige el siguiente
+            # frame en cuanto el robot avanza y hay piso real de nuevo.
+            if points:
+                last_x, _last_y = points[-1]
+                side = -1 if last_x < C.ROBOT_BEV_X else 1
+                cx_extrap = 0.0 if side < 0 else float(w - 1)
+                points.append((cx_extrap, y))
+                weights.append(1.0)
             continue
 
         if free_cx is None:
