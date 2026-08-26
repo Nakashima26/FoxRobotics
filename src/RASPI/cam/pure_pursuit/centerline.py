@@ -120,13 +120,19 @@ def _pass_side_cx(row_mask: np.ndarray, safe_row_mask: np.ndarray, ox: float, co
         cx_rel = _widest_free_segment(safe_row_mask[iox:], pref_min)
         if cx_rel is None:
             cx_rel = _widest_free_segment(row_mask[iox:], pref_min)  # fallback sin margen
-        return (iox + cx_rel) if cx_rel is not None else iox + C.OBS_PHYSICAL_R_PX
+        # Último recurso si ni siquiera row_mask (sin margen) tiene un hueco
+        # ancho: usar OBS_INFLATE_R (radio YA bloqueado alrededor del
+        # obstáculo, físico+seguridad), NUNCA OBS_PHYSICAL_R_PX -- ese es
+        # solo el radio físico de la lata, más chico que lo que free_mask ya
+        # bloqueó, así que ese punto caía DENTRO de la propia zona bloqueada
+        # (el path terminaba apuntando a la lata en vez de esquivarla).
+        return (iox + cx_rel) if cx_rel is not None else iox + C.OBS_INFLATE_R
 
     if color == "Green":
         cx_abs = _widest_free_segment(safe_row_mask[:iox], pref_min)
         if cx_abs is None:
             cx_abs = _widest_free_segment(row_mask[:iox], pref_min)
-        return cx_abs if cx_abs is not None else iox - C.OBS_PHYSICAL_R_PX
+        return cx_abs if cx_abs is not None else iox - C.OBS_INFLATE_R
 
     return None
 
@@ -287,11 +293,6 @@ def detect_centerline(
     floor_mask = cv2.morphologyEx(floor_mask, cv2.MORPH_OPEN,  k3)
     floor_mask = cv2.morphologyEx(floor_mask, cv2.MORPH_CLOSE, k5)
 
-    # Distancia de cada pixel de piso (SIN obstáculos aún restados) a la pared/
-    # borde no-piso más cercano — usada abajo para medir cuánto margen real
-    # hay del lado de paso de cada obstáculo, antes de decidir el sesgo WRO.
-    floor_dist = cv2.distanceTransform(floor_mask, cv2.DIST_L2, 5)
-
     # ── 2. Eliminar obstáculos + sesgo de color WRO ───────────────────────────
     free_mask = floor_mask.copy()
     for ox, oy, color in bev_obstacles:
@@ -300,28 +301,15 @@ def detect_centerline(
         # Zona de seguridad simétrica alrededor del obstáculo
         cv2.circle(free_mask, (ix, iy), C.OBS_INFLATE_R, 0, -1)
 
-        # Sesgo asimétrico según reglas WRO de color — pero REDUCIDO si el
-        # lado de paso ya está pegado a una pared. Empujar más el hueco hacia
-        # ese lado (bloqueando más el lado contrario) solo tiene sentido si
-        # ahí hay margen real; si no, el efecto es apretar el path contra la
-        # pared en vez de darle más espacio para pasar — justo lo que causaba
-        # que a veces el carro se estrellara contra la pared hacia la que
-        # "esquivaba". Se mide el margen con floor_dist (piso puro, antes de
-        # cualquier círculo de obstáculo) justo más allá del inflado, del
-        # lado de paso, y se escala el shift 0..1 según ese margen.
-        iiy = int(np.clip(iy, 0, h - 1))
+        # Sesgo asimétrico según reglas WRO de color
         if color == "Red":
-            check_x = int(np.clip(ix + C.OBS_INFLATE_R, 0, w - 1))
-            wall_room = float(floor_dist[iiy, check_x])
-            shift = C.OBS_BIAS_SHIFT * min(1.0, wall_room / C.OBS_BIAS_WALL_NEAR_PX)
-            cx_bias = ix - shift
-            cv2.circle(free_mask, (int(round(cx_bias)), iy), C.OBS_INFLATE_R, 0, -1)
+            # Robot debe pasar por la DERECHA → bloquear más a la izquierda del bloque
+            cx_bias = ix - C.OBS_BIAS_SHIFT
+            cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
         elif color == "Green":
-            check_x = int(np.clip(ix - C.OBS_INFLATE_R, 0, w - 1))
-            wall_room = float(floor_dist[iiy, check_x])
-            shift = C.OBS_BIAS_SHIFT * min(1.0, wall_room / C.OBS_BIAS_WALL_NEAR_PX)
-            cx_bias = ix + shift
-            cv2.circle(free_mask, (int(round(cx_bias)), iy), C.OBS_INFLATE_R, 0, -1)
+            # Robot debe pasar por la IZQUIERDA → bloquear más a la derecha del bloque
+            cx_bias = ix + C.OBS_BIAS_SHIFT
+            cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
 
     # ── 2b. Margen de seguridad contra CUALQUIER borde no-piso (pared incl.) ──
     # distanceTransform da, por pixel libre, la distancia al pixel no-libre
