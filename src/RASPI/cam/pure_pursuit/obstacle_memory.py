@@ -178,6 +178,22 @@ class ObstacleMemory:
         self._obs = kept
         return passed
 
+    # ── Debug ───────────────────────────────────────────────────────────────────
+
+    def debug_closest(self) -> str:
+        """
+        Resumen de una línea del obstáculo MÁS CERCANO al robot (mayor y)
+        actualmente en memoria, para overlay en pantalla -- permite comparar
+        el ritmo real de avance de `y` frame a frame contra lo que se ve en
+        el video, y así confirmar si ROBOT_SPEED_MMS está bien calibrado
+        (independiente del margen con el que `pasado` termine disparando).
+        """
+        if not self._obs:
+            return "-"
+        o = max(self._obs, key=lambda x: x.y)
+        behind_y = self.ry + C.OBS_MEM_BEHIND_PAD
+        return f"y={o.y:.0f} conf={o.conf:.2f} falta={behind_y - o.y:+.0f}px"
+
     # ── API ─────────────────────────────────────────────────────────────────────
 
     def update(self,

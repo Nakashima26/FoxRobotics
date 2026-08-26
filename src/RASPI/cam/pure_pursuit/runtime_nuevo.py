@@ -206,6 +206,7 @@ class PPRuntime:
         fps:          float,
         n_mem:        int,
         prune_reason: str = "-",
+        timing_ms:    dict | None = None,
     ):
         lines = [
             f"fps={fps:.1f}  pp={'ON' if pp_active else 'OFF'}  pts={n_path_pts}",
@@ -213,7 +214,13 @@ class PPRuntime:
             f"obs_R={len(positions.get('Red', []))}  obs_G={len(positions.get('Green', []))}  mem={n_mem}",
             f"tx: {serial_msg[:55]}",
             f"mem_prune: {prune_reason}",
+            f"mem_closest: {self.memory.debug_closest()}",
         ]
+        if timing_ms is not None:
+            lines.append(
+                "t(ms): cap={cap:.0f} vis={vis:.0f} bev={bev:.0f} "
+                "ser={ser:.0f} disp={disp:.0f} rec={rec:.0f}".format(**timing_ms)
+            )
         y = 22
         for txt in lines:
             cv2.putText(frame, txt, (10, y),
@@ -248,6 +255,8 @@ class PPRuntime:
         last_fps_time = time.perf_counter()
         fps_count     = 0
         fps           = 0.0
+        t_prev_end    = time.perf_counter()   # para medir tiempo de captura entre iteraciones
+        timing_ms     = {"cap": 0.0, "vis": 0.0, "bev": 0.0, "ser": 0.0, "disp": 0.0, "rec": 0.0}
 
         try:
             while True:
@@ -276,9 +285,17 @@ class PPRuntime:
                     dt_s = now - self._last_update_t
                 self._last_update_t = now
 
+                # Tiempo de captura: desde que terminó de procesar el frame
+                # anterior hasta que este frame quedó listo para procesar
+                # (incluye el bloqueo real de _read_frame() + el overhead de
+                # frames saltados por process_every_n).
+                timing_ms["cap"] = (now - t_prev_end) * 1000.0
+
                 # ── Visión ──────────────────────────────────────────────────
                 frame = cv2.flip(frame, 1)
                 processed_frame, positions = self.vision.process_frame(frame)
+                t_vis = time.perf_counter()
+                timing_ms["vis"] = (t_vis - now) * 1000.0
 
                 # ── Pipeline Pure Pursuit ────────────────────────────────────
                 steer_deg     = 0.0
@@ -422,6 +439,9 @@ class PPRuntime:
                 # Sin línea válida → recto (obs=0).
                 state = "pp_follow" if pp_active else "no_path"
 
+                t_bev = time.perf_counter()
+                timing_ms["bev"] = (t_bev - t_vis) * 1000.0
+
                 # ── Construir y enviar mensaje serial ────────────────────────
                 serial_msg = self._build_serial_message(
                     obs_norm, state, len(bev_obstacles), pasado, interior
@@ -465,12 +485,14 @@ class PPRuntime:
                 print(f"[LINEA] Orange={line_info['Orange']}", flush=True)
                 print(f"[DIR] fija={self.turn_dir_tracker.direction} interior={interior}", flush=True)
 
-                
+                t_ser = time.perf_counter()
+                timing_ms["ser"] = (t_ser - t_bev) * 1000.0
+
                 # ── Display ──────────────────────────────────────────────────
                 self._annotate(processed_frame, steer_deg, obs_norm,
                             pp_active, len(path_points), positions,
                             serial_msg, fps, len(bev_obstacles),
-                            self.memory.last_prune_reason)
+                            self.memory.last_prune_reason, timing_ms)
 
                 if bev_frame is not None:
                     bev_debug = draw_bev_debug(
@@ -485,6 +507,9 @@ class PPRuntime:
                 else:
                     combined = processed_frame
 
+                t_disp = time.perf_counter()
+                timing_ms["disp"] = (t_disp - t_ser) * 1000.0
+
                 if self.cfg.show_window:
                     cv2.imshow("WRO Pure Pursuit + Memoria", combined)
                     if cv2.waitKey(1) & 0xFF == 27:
@@ -492,6 +517,9 @@ class PPRuntime:
 
                 self._maybe_record(processed_frame, fps)
                 self._write_cam_frame(combined)   # ← ahora manda cámara + BEV/ruta
+
+                t_prev_end = time.perf_counter()
+                timing_ms["rec"] = (t_prev_end - t_disp) * 1000.0
 
         finally:
             if self.frame_grabber is not None:
