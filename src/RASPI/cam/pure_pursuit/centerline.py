@@ -372,6 +372,8 @@ def detect_centerline(
 
         best_w = 0.0
         pass_cx: int | None = None
+        best_ox: float | None = None
+        best_color: str | None = None
         for ox, oy, color in bev_obstacles:
             if color not in ("Red", "Green"):
                 continue
@@ -381,6 +383,8 @@ def detect_centerline(
                 if cx_side is not None:
                     best_w = wgt
                     pass_cx = cx_side
+                    best_ox = ox
+                    best_color = color
 
         # Urgencia frontal por pared tiene prioridad sobre el sesgo de color
         # WRO — aquí no hay tiempo para respetar el lado de paso de una lata,
@@ -473,6 +477,19 @@ def detect_centerline(
             # de paso correcto en vez de rozar/cortar por la lata.
             cx_check = int(np.clip(round(cx), 0, w - 1))
             if free_mask[y, cx_check] == 0:
+                cx = float(pass_cx)
+
+            # El blend también puede quedar del lado INCORRECTO del obstáculo
+            # (transitable, pero violando la regla de color WRO) si free_cx
+            # -el hueco más ancho de la fila, sin noción de lado- cae del
+            # lado contrario a pass_cx y pesa más en el promedio. Una vez que
+            # el obstáculo ya pesa algo en esta fila (best_w>0), no hay
+            # "medio lado incorrecto" válido — o se ignora del todo (best_w=0,
+            # ya cubierto arriba) o se mueve hacia el lado correcto, nunca
+            # hacia el equivocado.
+            if best_color == "Red" and cx < best_ox:
+                cx = float(pass_cx)
+            elif best_color == "Green" and cx > best_ox:
                 cx = float(pass_cx)
 
         points.append((float(np.clip(cx, 0, w - 1)), y))
