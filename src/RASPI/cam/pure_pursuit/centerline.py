@@ -465,6 +465,15 @@ def detect_centerline(
             cx = float(free_cx)
         else:
             cx = (1.0 - best_w) * float(free_cx) + best_w * float(pass_cx)
+            # El blend lineal en espacio de píxeles puede caer DENTRO de la
+            # zona bloqueada del obstáculo si free_cx y pass_cx quedan en
+            # lados opuestos de la lata (promedio de dos puntos seguros que
+            # cruza justo por en medio del hueco tapado). Si el punto
+            # resultante no es transitable, comprometerse de una vez al lado
+            # de paso correcto en vez de rozar/cortar por la lata.
+            cx_check = int(np.clip(round(cx), 0, w - 1))
+            if free_mask[y, cx_check] == 0:
+                cx = float(pass_cx)
 
         points.append((float(np.clip(cx, 0, w - 1)), y))
         weights.append(best_w)
