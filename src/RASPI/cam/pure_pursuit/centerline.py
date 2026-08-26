@@ -261,6 +261,7 @@ def _extract_thin_blue_line(hsv: np.ndarray, shape: tuple) -> np.ndarray:
 def detect_centerline(
     bev_bgr: np.ndarray,
     bev_obstacles: list[tuple[float, float, str]],
+    bev_hsv: np.ndarray | None = None,
 ) -> list[tuple[int, int]]:
     """
     Detecta la línea central del corredor en la imagen BEV.
@@ -273,6 +274,11 @@ def detect_centerline(
     Parámetros:
       bev_bgr      : imagen BEV en BGR (BEV_W × BEV_H)
       bev_obstacles: lista de (bev_x, bev_y, color_str)  color_str = "Red"|"Green"
+      bev_hsv      : conversión HSV de bev_bgr ya calculada, si el caller ya
+                     la tiene (runtime_nuevo.py la comparte con
+                     OrangeLineTracker.update() para no convertir la misma
+                     imagen BGR->HSV dos veces por frame). Si no se pasa, se
+                     calcula aquí como antes.
 
     Retorna lista de (x, y) en coordenadas BEV, ordenada de abajo (robot)
     hacia arriba (adelante).  Lista vacía si no hay suficiente piso visible.
@@ -280,7 +286,7 @@ def detect_centerline(
     h, w = bev_bgr.shape[:2]
 
     # ── 1. Máscara de piso ────────────────────────────────────────────────────
-    hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
+    hsv = bev_hsv if bev_hsv is not None else cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
 
     # 1a. Piso "seguro": beige/naranja/azul estricto — nunca confunde pared.
     floor_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)

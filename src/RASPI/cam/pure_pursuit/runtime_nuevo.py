@@ -69,6 +69,11 @@ class PPConfig:
     record_every_n:  int         = 6
     record_fps:      float       = 5.0
 
+    # Vista en vivo (VNC) — CAM_FRAME_PATH, ver _write_cam_frame()
+    cam_frame_every_n: int = 2   # cada cuántos frames procesados se actualiza
+                                  # la captura para la vista remota; no afecta
+                                  # el video grabado (record_every_n, aparte)
+
     # BEV
     calib_path: Path | None = None
 
@@ -131,6 +136,7 @@ class PPRuntime:
         self.frame_grabber = None
         self.video_writer  = None
         self.record_count  = 0
+        self.cam_frame_count = 0
         self.output_file   = (resolve_output_path(cfg.record_output)
                               if cfg.record_orillas else None)
 
@@ -185,6 +191,13 @@ class PPRuntime:
         self.video_writer.write(frame.copy())
 
     def _write_cam_frame(self, frame: np.ndarray):
+        # Throttle: esto es para la vista remota en vivo (VNC), no para el
+        # video grabado -- no necesita actualizarse cada frame procesado.
+        # Antes corría SIEMPRE, sin condición, comiéndose un encode JPEG +
+        # escritura a disco síncrona en cada frame.
+        self.cam_frame_count += 1
+        if self.cam_frame_count % max(1, self.cfg.cam_frame_every_n) != 0:
+            return
         try:
             _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
             with open(CAM_FRAME_PATH, "wb") as f:
@@ -313,6 +326,11 @@ class PPRuntime:
                 if self.bev.is_calibrated:
                     try:
                         bev_frame = self.bev.warp(processed_frame)
+                        # Se convierte UNA sola vez y se comparte con
+                        # detect_centerline() y line_tracker.update() -- antes
+                        # cada una convertía la misma imagen BGR->HSV por su
+                        # cuenta, duplicando trabajo cada frame.
+                        bev_hsv = cv2.cvtColor(bev_frame, cv2.COLOR_BGR2HSV)
 
                         # Proyectar obstáculos detectados al plano BEV, y
                         # separar los que NO proyectaron (candidatos a hint lejano)
@@ -346,7 +364,7 @@ class PPRuntime:
                         # el tracker con persistencia (no detect_lines() cruda)
                         # para no "bailar" entre el segmento ocluido y el
                         # despejado frame a frame.
-                        line_info = {"Orange": self.line_tracker.update(bev_frame)}
+                        line_info = {"Orange": self.line_tracker.update(bev_frame, bev_hsv=bev_hsv)}
 
                         # ── Cooldown post-giro: justo al salir de un giro,
                         # OrangeLineTracker se reseteó y apenas está re-
@@ -399,7 +417,7 @@ class PPRuntime:
 
                         # Detectar centerline (con obstáculos recordados+nuevos,
                         # ya sin los que quedaron más allá de la naranja)
-                        path_points = detect_centerline(bev_frame, bev_obstacles)
+                        path_points = detect_centerline(bev_frame, bev_obstacles, bev_hsv=bev_hsv)
 
                         if len(path_points) >= C.MIN_PATH_PTS:
                             lookahead_eff = self.controller.adaptive_lookahead(
@@ -550,6 +568,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--record-output",    type=str,   default=None)
     p.add_argument("--record-every",     type=int,   default=6)
     p.add_argument("--record-fps",       type=float, default=5.0)
+    p.add_argument("--cam-frame-every",  type=int,   default=2,
+                   help="Cada cuántos frames procesados se actualiza la captura para vista remota (VNC)")
     return p.parse_args()
 
 
@@ -593,6 +613,7 @@ def main():
         record_output    = args.record_output,
         record_every_n   = max(1, args.record_every),
         record_fps       = max(1.0, args.record_fps),
+        cam_frame_every_n = max(1, args.cam_frame_every),
         calib_path       = Path(args.calib_path) if args.calib_path else None,
     )
 

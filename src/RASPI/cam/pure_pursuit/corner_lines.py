@@ -107,7 +107,7 @@ def line_side_is_near(px: float, py: float,
     return (cross_ref >= 0) == (cross_pt >= 0)
 
 
-def detect_lines(bev_bgr: np.ndarray) -> dict:
+def detect_lines(bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None) -> dict:
     """
     Retorna {'seen': bool, 'near_y': float|None} para la línea naranja.
     near_y = coordenada Y-BEV de la franja real más cercana al robot
@@ -122,8 +122,13 @@ def detect_lines(bev_bgr: np.ndarray) -> dict:
     siguiente segmento realmente visible más lejos. Para uso en el
     runtime real, usar OrangeLineTracker (abajo), que suaviza esto en
     el tiempo.
+
+    bev_hsv: conversión HSV de bev_bgr ya calculada, si el caller ya la tiene
+    (evita convertir la misma imagen BGR->HSV más de una vez por frame — ver
+    runtime_nuevo.py, que también se la pasa a detect_centerline()). Si no
+    se pasa, se calcula aquí como antes.
     """
-    hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
+    hsv = bev_hsv if bev_hsv is not None else cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
     mask = _line_mask(hsv, C.LINE_ORANGE_HSV)
     near_y = _find_near_line_row(mask, C.LINE_MIN_RUN_PX)
     return {"Orange": {"seen": near_y is not None, "near_y": near_y}}
@@ -164,8 +169,15 @@ class OrangeLineTracker:
             return True
         return abs(raw["near_y"] - self._candidate["near_y"]) <= self.tolerance_px
 
-    def update(self, bev_bgr: np.ndarray) -> dict:
-        raw = detect_lines(bev_bgr)["Orange"]
+    def update(self, bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None) -> dict:
+        """
+        bev_hsv: ver detect_lines() -- si el caller ya convirtió bev_bgr a
+        HSV este frame (runtime_nuevo.py lo hace para compartirla con
+        detect_centerline()), pásala aquí para no repetir la conversión.
+        """
+        if bev_hsv is None:
+            bev_hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
+        raw = detect_lines(bev_bgr, bev_hsv=bev_hsv)["Orange"]
 
         if self._matches_candidate(raw):
             self._candidate_count += 1
@@ -178,8 +190,7 @@ class OrangeLineTracker:
             if self.stable["seen"]:
                 # Ajusta la recta (con pendiente) SOLO una vez que near_y ya
                 # es estable — así el ancla de la banda no "baila" también.
-                hsv  = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
-                mask = _line_mask(hsv, C.LINE_ORANGE_HSV)
+                mask = _line_mask(bev_hsv, C.LINE_ORANGE_HSV)
                 self.stable["line"] = _fit_line_near(
                     mask, self.stable["near_y"],
                     C.LINE_FIT_BAND_PX, C.LINE_FIT_MIN_POINTS,
