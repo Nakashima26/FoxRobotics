@@ -171,7 +171,7 @@ void escribirServo(int angulo) {
 }
 
 void setMotor(int velocidad) {
-  velocidad = constrain(velocidad, 0, 80);
+  velocidad = constrain(velocidad, 0, 100);
   ledcWrite(PWMA, velocidad);
 }
 
@@ -590,7 +590,7 @@ void loop() {
       if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo
           && detectarEsquina(distL, distR)
-          && millis() - timeStart > 5000) 
+          && millis() - timeStart > 3000) 
       {
         estado     = GIRANDO;
         anguloGyro = 0;
