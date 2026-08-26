@@ -372,6 +372,22 @@ def detect_centerline(
                 cx_fallback = float(np.argmax(row_dist))
                 points.append((float(np.clip(cx_fallback, 0, w - 1)), y))
                 weights.append(best_w)
+                continue
+
+            # Fila SIN NADA de piso detectado (viendo la pared casi de frente
+            # / ángulo muy oblicuo — dist.max()==0 significa que ni siquiera
+            # hay un pixel libre en toda la fila). En vez de dejar un hueco y
+            # arriesgar quedarnos sin suficientes puntos (path descartado,
+            # "no_path"), extendemos la curvatura que YA se detectó cerca del
+            # robot: si los últimos dos puntos venían doblando hacia el piso
+            # libre, seguimos esa misma tendencia hacia adelante en vez de
+            # asumir que no hay camino. Se autocorrige el siguiente frame en
+            # cuanto el robot avanza y hay piso real que detectar de nuevo.
+            if len(points) >= 2:
+                (x1, _y1), (x2, _y2) = points[-2], points[-1]
+                cx_extrap = x2 + (x2 - x1)
+                points.append((float(np.clip(cx_extrap, 0, w - 1)), y))
+                weights.append(best_w)
             continue
 
         if free_cx is None:
