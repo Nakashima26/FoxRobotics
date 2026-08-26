@@ -89,6 +89,12 @@ bool  piInteriorPass = false; // intr=1: el obstáculo actual se pasa por el mis
                                // sabe la dirección de giro, por visión, y el color
                                // del obstáculo) — el giro mismo resuelve el paso,
                                // no hace falta seguir bloqueando detectarEsquina().
+bool  piSlowForCorner = false; // slow=1: la Pi ya ve la línea naranja cerca
+                               // (LINE_PROXIMITY_PX) — bajar velocidad en
+                               // SIGUIENDO para que el debounce de
+                               // detectarEsquina() tenga más resolución
+                               // espacial (a más lento, menos avance por
+                               // lectura de ultrasonido).
 bool  piReady      = false;
 
 unsigned long lastPiMsgMs = 0;
@@ -140,6 +146,12 @@ int  AngGiro            =88;
 unsigned long lastTurnTime = 0;
 int timeStart = 0;
 const int cooldownGiro     = 1500;   // ms entre giros
+
+// Velocidad reducida en SIGUIENDO cuando la Pi ve la naranja cerca (piSlowForCorner).
+// DEBE quedar por debajo del tope de setMotor() (100) para que en verdad haga
+// algo — 180 (velocidad normal) ya se aplasta a 100 ahí, así que cualquier
+// valor >=100 aquí sería idéntico a no bajar nada.
+int velocidadPreEsquina = 70;   // <-- ajustar en pista
 
 // ── Detección de esquinas ─────────────────────────────────────────────────────
 int contadorEsquina    = 0;
@@ -304,6 +316,17 @@ void parsePiMessage(String line) {
       piInteriorPass = (s.toInt() != 0);
     } else {
       piInteriorPass = false;
+    }
+
+    // slow — la Pi ya ve la línea naranja cerca (LINE_PROXIMITY_PX). Ausente
+    // en V1 → false por defecto (velocidad normal).
+    idx = line.indexOf("slow=");
+    if (idx >= 0) {
+      int end = line.indexOf(',', idx);
+      String s = (end >= 0) ? line.substring(idx + 5, end) : line.substring(idx + 5);
+      piSlowForCorner = (s.toInt() != 0);
+    } else {
+      piSlowForCorner = false;
     }
 
     piReady     = true;
@@ -574,7 +597,10 @@ void loop() {
   switch (estado) {
 
     case SIGUIENDO: {
-      velocidadMotor = 180;
+      // Cerca de la naranja (piSlowForCorner): bajar velocidad para que el
+      // debounce de detectarEsquina() tenga más resolución espacial y no se
+      // pase de la esquina real antes de disparar el giro.
+      velocidadMotor = piSlowForCorner ? velocidadPreEsquina : 180;
 
       // La Pi confirma que el robot ya atravesó físicamente el obstáculo
       // (evento de un solo frame) -> entrar a RECUPERANDO. Ya no depende de

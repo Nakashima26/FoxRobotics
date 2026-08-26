@@ -267,14 +267,18 @@ class PPRuntime:
 
     def _build_serial_message(self, obs_norm: float, state: str, n_mem_obs: int,
                                pasado: bool, interior: bool,
-                               block_turn: bool | None = None) -> str:
+                               block_turn: bool | None = None,
+                               near_orange: bool = False) -> str:
         # prio: bloquea giro en ESP32. En pre-giro solo latas cercanas;
         # pasado/intr siguen informando RECUPERANDO / paso interior.
+        # slow=1: la línea naranja ya se ve cerca (LINE_PROXIMITY_PX) — el ESP32
+        # baja velocidad en SIGUIENDO para darle más resolución espacial al
+        # debounce de detectarEsquina() (a más lento, menos avance por lectura).
         if block_turn is None:
             block_turn = n_mem_obs > 0
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
                 f"state={state},prio={int(block_turn)},mem={n_mem_obs},pp=1,"
-                f"pasado={int(pasado)},intr={int(interior)}")
+                f"pasado={int(pasado)},intr={int(interior)},slow={int(near_orange)}")
 
     # ── Captura ───────────────────────────────────────────────────────────────
 
@@ -417,6 +421,7 @@ class PPRuntime:
                 line_info     = {"Orange": {"seen": False, "near_y": None}}
                 bev_obstacles_beyond = []
                 interior      = False
+                near_orange   = False
 
                 if self.bev.is_calibrated:
                     try:
@@ -475,6 +480,17 @@ class PPRuntime:
                         # cuenta como mi recta — mismo comportamiento de siempre).
                         bev_obstacles_beyond = []
                         orange_info = line_info["Orange"]
+
+                        # ── Velocidad de acercamiento a la naranja: entre más
+                        # cerca (LINE_PROXIMITY_PX), más resolución espacial
+                        # necesita el debounce de detectarEsquina() en el ESP32
+                        # para no pasarse de la esquina real antes de girar.
+                        near_orange = (
+                            orange_info["seen"]
+                            and orange_info["near_y"] is not None
+                            and (C.ROBOT_BEV_Y - orange_info["near_y"]) <= C.LINE_PROXIMITY_PX
+                        )
+
                         if orange_info["seen"] and not en_recuperacion_giro:
                             bev_obstacles_mine = []
                             for o in bev_obstacles:
@@ -582,7 +598,8 @@ class PPRuntime:
 
                 # ── Construir y enviar mensaje serial ────────────────────────
                 serial_msg = self._build_serial_message(
-                    obs_norm, state, mem_report, pasado, interior, block_turn
+                    obs_norm, state, mem_report, pasado, interior, block_turn,
+                    near_orange,
                 )
                 self.serial_link.send_line(serial_msg)
                 serial_ack = self.serial_link.try_readline()
@@ -636,6 +653,7 @@ class PPRuntime:
 
                 print(f"[LINEA] Orange={line_info['Orange']}", flush=True)
                 print(f"[DIR] fija={self.turn_dir_tracker.direction} interior={interior}", flush=True)
+                print(f"[SLOW] near_orange={near_orange}", flush=True)
 
                 
                 # ── Display ──────────────────────────────────────────────────
