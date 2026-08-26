@@ -136,6 +136,18 @@ LOOKAHEAD_OBS_FAR_PX  = OBSTACLE_CASUAL_MM / MM_PER_PX   # ≈250px
 
 CENTERLINE_URGENCY_RELAX = 1.6
 
+# ─── Urgencia frontal por pared (chasis apuntando DE FRENTE, no paralelo) ────
+# Si hay pared/no-piso dentro de esta distancia MEDIDA A LO LARGO DEL EJE DEL
+# CHASIS (columna ROBOT_BEV_X, no del hueco que el centerline elige), el
+# chasis mismo está apuntando hacia ella -- distinto de "hay pared cerca a un
+# lado", que es normal en un corredor angosto y no debe disparar esto.
+# Empieza en 150mm, ajustar según comportamiento real en pista.
+FRONT_WALL_CRITICAL_MM   = 150.0
+FRONT_WALL_CRITICAL_PX   = FRONT_WALL_CRITICAL_MM / MM_PER_PX   # ≈75px
+FRONT_CHECK_HALFWIDTH_PX = 30    # medio-ancho del "carril" frontal revisado,
+                                   # en px BEV -- ajustar al ancho real del
+                                   # chasis si hace falta más/menos margen
+
 # Suaviza el steer de esquiva cuando el obstáculo aún no está crítico.
 # Atenuación de steer por distancia — misma escala
 STEER_DIST_GAIN_NEAR_PX = OBSTACLE_URGENT_MM / MM_PER_PX   # ≈110px

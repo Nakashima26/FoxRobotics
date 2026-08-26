@@ -121,6 +121,21 @@ def _pass_side_cx(row_mask: np.ndarray, safe_row_mask: np.ndarray, ox: float, co
     return None
 
 
+def _wall_urgency_cx(row_mask: np.ndarray, side: int) -> int | None:
+    """
+    Centro del hueco libre más ancho al lado del chasis indicado por `side`
+    (-1 = izquierda, +1 = derecha de ROBOT_BEV_X), usado cuando el chasis
+    apunta de frente a una pared y hay que abrirse hacia el lado despejado
+    sin importar el sesgo de color WRO (aquí no hay tiempo para eso).
+    """
+    mid = C.ROBOT_BEV_X
+    pref_min = max(1, C.CENTERLINE_MIN_WIDTH // 2)
+    if side < 0:
+        return _widest_free_segment(row_mask[:mid], pref_min)
+    seg = _widest_free_segment(row_mask[mid:], pref_min)
+    return (mid + seg) if seg is not None else None
+
+
 def _smooth_x(points, weights=None):
     n = len(points)
     win = int(C.CENTERLINE_SMOOTH_WIN)
@@ -289,8 +304,31 @@ def detect_centerline(
     dist = cv2.distanceTransform(free_mask, cv2.DIST_L2, 5)
     safe_mask = np.where(dist >= C.WALL_MARGIN_PX, free_mask, 0).astype(np.uint8)
 
-    # ── 3. Muestreo fila a fila (rampa al lado de paso, no switch binario) ────
-        # ── 3. Muestreo fila a fila ────────────────────────────────────────────
+    # ── 2c. Urgencia frontal por pared: ¿el chasis mismo apunta a una pared? ──
+    # Se revisa un carril angosto centrado en el eje del chasis (ROBOT_BEV_X),
+    # NO el hueco que el centerline elegiría — así se distingue "voy de frente
+    # contra la pared" (carril frontal bloqueado) de "hay pared cerca a un
+    # lado mientras avanzo recto" (carril frontal libre, corredor angosto
+    # normal), que no debe disparar esta corrección.
+    hw = C.FRONT_CHECK_HALFWIDTH_PX
+    x_lo = max(0, C.ROBOT_BEV_X - hw)
+    x_hi = min(w, C.ROBOT_BEV_X + hw)
+    y_front_top = max(0, C.ROBOT_BEV_Y - int(C.FRONT_WALL_CRITICAL_PX))
+    front_band = free_mask[y_front_top:C.ROBOT_BEV_Y, x_lo:x_hi]
+    front_blocked = front_band.size > 0 and bool(np.any(front_band == 0))
+
+    wall_side = 0
+    if front_blocked:
+        # ¿de qué lado hay más piso libre a la altura crítica? Ese es hacia
+        # donde se fuerza el path — con toda su urgencia, sin rampa: es una
+        # condición de "voy a chocar", no una esquiva planeada.
+        y_check = max(C.CENTERLINE_TOP_Y, y_front_top)
+        row_check = free_mask[y_check, :]
+        left_free  = int(np.count_nonzero(row_check[:C.ROBOT_BEV_X]))
+        right_free = int(np.count_nonzero(row_check[C.ROBOT_BEV_X:]))
+        wall_side = -1 if left_free >= right_free else 1
+
+    # ── 3. Muestreo fila a fila ────────────────────────────────────────────
     points: list[tuple[float, int]] = []
     weights: list[float] = []
     for y in range(h - 10, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
@@ -311,6 +349,19 @@ def detect_centerline(
                 if cx_side is not None:
                     best_w = wgt
                     pass_cx = cx_side
+
+        # Urgencia frontal por pared tiene prioridad sobre el sesgo de color
+        # WRO — aquí no hay tiempo para respetar el lado de paso de una lata,
+        # el chasis está apuntando de frente a la pared. Sin rampa: mientras
+        # dure la condición, se fuerza el lado despejado con máxima urgencia.
+        wall_cx = _wall_urgency_cx(row, wall_side) if wall_side != 0 else None
+
+        if wall_cx is not None:
+            cx = float(wall_cx)
+            best_w = 1.0
+            points.append((float(np.clip(cx, 0, w - 1)), y))
+            weights.append(best_w)
+            continue
 
         if free_cx is None and pass_cx is None:
             # Sin hueco válido en esta fila: no dejar un vacío en el path —
