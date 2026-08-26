@@ -51,9 +51,11 @@ def map_obstacle_to_bev(
 
 # ── Helpers internos ──────────────────────────────────────────────────────────
 
-def _widest_free_segment(row_mask: np.ndarray, min_width: int) -> int | None:
+def _widest_free_segment_bounds(row_mask: np.ndarray, min_width: int) -> tuple[int, int] | None:
     """
-    Retorna el centro-x del segmento libre más ancho en una fila de máscara.
+    Retorna (izq, der) del segmento libre más ancho en una fila de máscara.
+    Expone los bordes (no solo el centro) para poder ajustar la tendencia del
+    borde de la pared a lo largo de varias filas — ver `detect_centerline()`.
     """
     free_cols = np.where(row_mask > 0)[0]
     if len(free_cols) < min_width:
@@ -78,7 +80,15 @@ def _widest_free_segment(row_mask: np.ndarray, min_width: int) -> int | None:
 
     if best_w < min_width:
         return None
-    return (best_l + best_r) // 2
+    return best_l, best_r
+
+
+def _widest_free_segment(row_mask: np.ndarray, min_width: int) -> int | None:
+    """Retorna el centro-x del segmento libre más ancho en una fila de máscara."""
+    bounds = _widest_free_segment_bounds(row_mask, min_width)
+    if bounds is None:
+        return None
+    return (bounds[0] + bounds[1]) // 2
 
 
 def _ramp_weight(row_y: int, obs_y: float) -> float:
@@ -331,11 +341,20 @@ def detect_centerline(
     # ── 3. Muestreo fila a fila ────────────────────────────────────────────
     points: list[tuple[float, int]] = []
     weights: list[float] = []
+    # Historial de bordes (y, izq, der) del hueco safe_mask en filas con dato
+    # real -- permite, cuando una fila más adelante se queda sin piso, AJUSTAR
+    # la tendencia del borde que se está cerrando y proyectarla hacia
+    # adelante, en vez de reaccionar solo a lo que ya es visible (ver rama
+    # "sin piso" más abajo).
+    edge_hist: list[tuple[int, int, int]] = []
     for y in range(h - 10, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
         row = free_mask[y, :]
 
-        free_cx = _widest_free_segment(safe_mask[y, :], C.CENTERLINE_MIN_WIDTH)
-        if free_cx is None:
+        safe_bounds = _widest_free_segment_bounds(safe_mask[y, :], C.CENTERLINE_MIN_WIDTH)
+        if safe_bounds is not None:
+            edge_hist.append((y, safe_bounds[0], safe_bounds[1]))
+            free_cx = (safe_bounds[0] + safe_bounds[1]) // 2
+        else:
             free_cx = _widest_free_segment(row, C.CENTERLINE_MIN_WIDTH)
 
         best_w = 0.0
@@ -377,14 +396,37 @@ def detect_centerline(
             # Fila SIN NADA de piso detectado (viendo la pared casi de frente
             # / ángulo muy oblicuo — dist.max()==0 significa que ni siquiera
             # hay un pixel libre en toda la fila, no hay CÓMO saber dónde
-            # está el hueco a esta distancia específica). Lo que sí se sabe:
-            # el piso real más cercano al robot ya se estaba abriendo hacia
-            # un lado — comprometerse a ESE lado con máxima urgencia
-            # (weight=1.0, mismo mecanismo que ya relaja _limit_lateral_step
-            # para latas) en vez de una extrapolación tibia a ritmo normal.
-            # Esto es un giro decidido, no un intento de adivinar un camino
-            # recto que en realidad no existe. Se autocorrige el siguiente
-            # frame en cuanto el robot avanza y hay piso real de nuevo.
+            # está el hueco a esta distancia específica).
+            #
+            # No basta con comprometerse "a ciegas" al lado que ya se sabía
+            # abierto: la pared sigue una recta, y si ya se detectó que un
+            # borde se viene cerrando fila a fila, esa MISMA tendencia sigue
+            # más adelante -- se ajusta su pendiente con las dos últimas
+            # lecturas reales (edge_hist) y se proyecta hacia esta fila,
+            # aplicando el margen de seguridad contra la posición PREDICHA de
+            # la pared (no solo la visible). Esto es lo que permite anticipar
+            # que hay que cerrar el giro más de lo que el hueco visible
+            # todavía sugiere.
+            if len(edge_hist) >= 2:
+                (y1, l1, r1), (y2, l2, r2) = edge_hist[-2], edge_hist[-1]
+                dy = y2 - y1
+                dl = (l2 - l1) / dy if dy != 0 else 0.0
+                dr = (r2 - r1) / dy if dy != 0 else 0.0
+                if abs(dr) >= abs(dl):
+                    # Borde DERECHO cerrándose -> pared a la derecha.
+                    predicted_r = r2 + dr * (y - y2)
+                    cx_pred = predicted_r - C.WALL_MARGIN_PX
+                else:
+                    # Borde IZQUIERDO cerrándose -> pared a la izquierda.
+                    predicted_l = l2 + dl * (y - y2)
+                    cx_pred = predicted_l + C.WALL_MARGIN_PX
+                points.append((float(np.clip(cx_pred, 0, w - 1)), y))
+                weights.append(1.0)
+                continue
+
+            # Sin historial suficiente para ajustar una tendencia (p.ej. la
+            # primera fila ya sale sin piso): comprometerse al lado que ya se
+            # sabía abierto, con máxima urgencia, como red de seguridad.
             if points:
                 last_x, _last_y = points[-1]
                 side = -1 if last_x < C.ROBOT_BEV_X else 1
