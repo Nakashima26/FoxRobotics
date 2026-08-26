@@ -320,12 +320,25 @@ def detect_centerline(
     # contra la pared" (carril frontal bloqueado) de "hay pared cerca a un
     # lado mientras avanzo recto" (carril frontal libre, corredor angosto
     # normal), que no debe disparar esta corrección.
+    #
+    # SOLO corre sin obstáculos de color activos: un rojo/verde cercano NO es
+    # piso (floor_mask nunca clasifica rojo/verde como piso) y además "unta"
+    # su color en el BEV cuando está muy cerca de la cámara (artefacto normal
+    # de homografía con objetos que tienen altura) — eso deja el carril
+    # frontal marcado como "bloqueado" aunque no haya ninguna pared ahí. Con
+    # un obstáculo activo, el sistema de sesgo WRO (_pass_side_cx/ramp_weight)
+    # ya resuelve el paso correctamente; esta lógica de pared NO debe pelear
+    # con esa esquiva.
     hw = C.FRONT_CHECK_HALFWIDTH_PX
     x_lo = max(0, C.ROBOT_BEV_X - hw)
     x_hi = min(w, C.ROBOT_BEV_X + hw)
     y_front_top = max(0, C.ROBOT_BEV_Y - int(C.FRONT_WALL_CRITICAL_PX))
     front_band = free_mask[y_front_top:C.ROBOT_BEV_Y, x_lo:x_hi]
-    front_blocked = front_band.size > 0 and bool(np.any(front_band == 0))
+    front_blocked = (
+        not bev_obstacles
+        and front_band.size > 0
+        and bool(np.any(front_band == 0))
+    )
 
     wall_side = 0
     if front_blocked:
@@ -398,6 +411,13 @@ def detect_centerline(
             # hay un pixel libre en toda la fila, no hay CÓMO saber dónde
             # está el hueco a esta distancia específica).
             #
+            # Igual que la urgencia frontal (2c): con un obstáculo de color
+            # activo, "sin piso" puede ser el untado de su color en el BEV
+            # (objeto con altura cerca de la cámara), no una pared real — y
+            # edge_hist se construye del mismo safe_mask, así que heredaría
+            # ese mismo error. Sin obstáculo, sí se puede confiar en que es
+            # pared real y ajustar/proyectar su tendencia.
+            #
             # No basta con comprometerse "a ciegas" al lado que ya se sabía
             # abierto: la pared sigue una recta, y si ya se detectó que un
             # borde se viene cerrando fila a fila, esa MISMA tendencia sigue
@@ -407,6 +427,9 @@ def detect_centerline(
             # la pared (no solo la visible). Esto es lo que permite anticipar
             # que hay que cerrar el giro más de lo que el hueco visible
             # todavía sugiere.
+            if bev_obstacles:
+                continue
+
             if len(edge_hist) >= 2:
                 (y1, l1, r1), (y2, l2, r2) = edge_hist[-2], edge_hist[-1]
                 dy = y2 - y1
