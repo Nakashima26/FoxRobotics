@@ -30,27 +30,37 @@ def _line_mask(bev_hsv: np.ndarray, ranges) -> np.ndarray:
     return np.bitwise_or.reduce(masks) if len(masks) > 1 else masks[0]
 
 
-def _longest_run(row: np.ndarray) -> int:
-    """Ancho de la corrida contigua de pixeles>0 más larga en una fila 1D."""
-    cols = np.where(row > 0)[0]
-    if len(cols) == 0:
-        return 0
-    breaks = np.where(np.diff(cols) > 1)[0]
-    runs = np.split(cols, breaks + 1)
-    return max(len(r) for r in runs)
+def _row_max_runs(mask: np.ndarray) -> np.ndarray:
+    """
+    Longitud de la corrida contigua de pixeles>0 más larga, UNA POR FILA,
+    para toda la máscara de una sola vez (sin loop de Python fila por fila).
+
+    Truco estándar de "run-length vectorizado": running = cumsum de 1's que
+    se resetea a 0 en cada 0; reset_at = el último valor de running antes de
+    cada reset, propagado hacia adelante con maximum.accumulate; la longitud
+    de la corrida en curso en cada posición es running - reset_at, y el
+    máximo por fila es el resultado que antes se calculaba con
+    np.where/np.diff/np.split fila por fila (caro en Python puro sobre
+    hasta 400 filas, justo el caso más común: línea no visible).
+    """
+    a = (mask > 0).astype(np.int32)
+    running = a.cumsum(axis=1)
+    reset_at = np.where(a == 0, running, 0)
+    reset_at = np.maximum.accumulate(reset_at, axis=1)
+    return (running - reset_at).max(axis=1)
 
 
 def _find_near_line_row(mask: np.ndarray, min_run_px: int) -> float | None:
     """
-    Escanea desde la fila más cercana al robot (Y grande) hacia adelante
-    (Y chico) y retorna la Y de la primera fila con una corrida contigua
-    >= min_run_px. None si ninguna fila califica.
+    Retorna la Y (más cercana al robot, Y grande) de la primera fila con una
+    corrida contigua >= min_run_px, escaneando desde el robot hacia adelante.
+    None si ninguna fila califica.
     """
-    h = mask.shape[0]
-    for y in range(h - 1, -1, -1):
-        if _longest_run(mask[y, :]) >= min_run_px:
-            return float(y)
-    return None
+    max_runs = _row_max_runs(mask)
+    qualifying = np.where(max_runs >= min_run_px)[0]
+    if qualifying.size == 0:
+        return None
+    return float(qualifying.max())
 
 
 def _fit_line_near(mask: np.ndarray, near_y: float, band_px: float,
