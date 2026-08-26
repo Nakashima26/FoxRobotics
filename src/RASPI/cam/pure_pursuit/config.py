@@ -166,7 +166,7 @@ STEER_DIST_GAIN_MIN     = 0.5
 # El robot recuerda las latas vistas y las "arrastra" hacia sí mismo cuadro a
 # cuadro usando avance asumido (velocidad) + giro del IMU (anguloGyro del ESP32),
 # para no perder la inflación cuando la lata sale del campo de visión.
-ROBOT_SPEED_MMS    = 400.0   # velocidad de marcha asumida (mm/s). Ajustar al carro real.
+ROBOT_SPEED_MMS    = 350.0   # velocidad de marcha asumida (mm/s). Ajustar al carro real.
 OBS_MEM_MATCH_PX   = 50.0    # radio para fusionar una detección nueva con una recordada (px BEV)
 OBS_MEM_DECAY      = 0.12    # confianza perdida por frame sin re-ver el obstáculo (0..1)
 OBS_MEM_MIN_CONF   = 0.4    # por debajo de esto el obstáculo recordado se descarta
