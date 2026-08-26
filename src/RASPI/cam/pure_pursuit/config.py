@@ -160,13 +160,27 @@ STEER_DIST_GAIN_MIN     = 0.5
 # cuadro usando avance asumido (velocidad) + giro del IMU (anguloGyro del ESP32),
 # para no perder la inflación cuando la lata sale del campo de visión.
 ROBOT_SPEED_MMS    = 350.0   # velocidad de marcha asumida (mm/s). Ajustar al carro real.
-OBS_MEM_MATCH_PX   = 50.0    # radio para fusionar una detección nueva con una recordada (px BEV)
+# A esta velocidad y ~7fps, el arrastre por frame ya es ~25px -- con el
+# match radius en 50px (original), apenas 2 frames seguidos sin re-detección
+# fresca (blur, oclusión momentánea) ya alcanzan a superarlo y _merge() crea
+# un registro NUEVO en vez de actualizar el existente = objeto fantasma
+# duplicado. Subido a ~3 frames de tolerancia -- NO más que eso, porque
+# _merge() solo filtra por color, no por qué lado de una esquina está el
+# objeto: dos obstáculos del mismo color pegados al interior en extremos
+# opuestos de una esquina (fin de una recta / inicio de la siguiente) sí
+# pueden quedar a esta distancia en BEV, y un radio más grande arriesgaría
+# confundirlos entre sí en esa transición. Si el fantasma sigue apareciendo
+# a este valor, el fix correcto ya no es este radio -- es hacer que
+# _merge() respete la clasificación mine/beyond de OrangeLineTracker.
+OBS_MEM_MATCH_PX   = 75.0    # radio para fusionar una detección nueva con una recordada (px BEV)
 OBS_MEM_DECAY      = 0.12    # confianza perdida por frame sin re-ver el obstáculo (0..1)
 OBS_MEM_MIN_CONF   = 0.4    # por debajo de esto el obstáculo recordado se descarta
 OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
 OBS_MEM_BEHIND_PAD = 1      # px: tirar el obstáculo cuando queda detrás del robot (bev_y > robot_y + pad)
 OBS_MEM_MAX        = 12      # tope de obstáculos recordados (seguridad)
-OBS_MEM_DEDUPE_PX  = 40.0
+OBS_MEM_DEDUPE_PX  = 55.0    # red de seguridad secundaria si igual se duplica -- ver OBS_MEM_MATCH_PX
+                              # (mismo riesgo de confundir obstáculos de esquina: se
+                              # queda deliberadamente por debajo de OBS_MEM_MATCH_PX)
 
 # Red de seguridad para runtime_nuevo.py: si el ESP32 se queda atorado
 # reportando est=G (ack perdido, giro real que nunca termina, etc.), no

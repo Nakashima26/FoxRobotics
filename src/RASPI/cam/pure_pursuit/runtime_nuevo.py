@@ -220,6 +220,7 @@ class PPRuntime:
         n_mem:        int,
         prune_reason: str = "-",
         timing_ms:    dict | None = None,
+        bev_timing:   dict | None = None,
     ):
         lines = [
             f"fps={fps:.1f}  pp={'ON' if pp_active else 'OFF'}  pts={n_path_pts}",
@@ -233,6 +234,11 @@ class PPRuntime:
             lines.append(
                 "t(ms): cap={cap:.0f} vis={vis:.0f} bev={bev:.0f} "
                 "ser={ser:.0f} disp={disp:.0f} rec={rec:.0f}".format(**timing_ms)
+            )
+        if bev_timing is not None:
+            lines.append(
+                "bev: warp={warp:.0f} proj={proj:.0f} mem={mem:.0f} "
+                "line={line:.0f} dc={dc:.0f} ctrl={ctrl:.0f}".format(**bev_timing)
             )
         y = 22
         for txt in lines:
@@ -322,15 +328,19 @@ class PPRuntime:
                 line_info     = {"Orange": {"seen": False, "near_y": None}}
                 bev_obstacles_beyond = []
                 interior      = False
+                bev_timing    = {"warp": 0.0, "proj": 0.0, "mem": 0.0, "line": 0.0, "dc": 0.0, "ctrl": 0.0}
 
                 if self.bev.is_calibrated:
                     try:
+                        _t0 = time.perf_counter()
                         bev_frame = self.bev.warp(processed_frame)
                         # Se convierte UNA sola vez y se comparte con
                         # detect_centerline() y line_tracker.update() -- antes
                         # cada una convertía la misma imagen BGR->HSV por su
                         # cuenta, duplicando trabajo cada frame.
                         bev_hsv = cv2.cvtColor(bev_frame, cv2.COLOR_BGR2HSV)
+                        _t1 = time.perf_counter()
+                        bev_timing["warp"] = (_t1 - _t0) * 1000.0
 
                         # Proyectar obstáculos detectados al plano BEV, y
                         # separar los que NO proyectaron (candidatos a hint lejano)
@@ -346,6 +356,8 @@ class PPRuntime:
                                     # No proyectó (fuera de bev_in_bounds o
                                     # cam_to_bev falló) → tratar como lejano
                                     far_objects.append((x + w / 2.0, w, h, color_name))
+                        _t2 = time.perf_counter()
+                        bev_timing["proj"] = (_t2 - _t1) * 1000.0
 
                         # ── Memoria rodante: apagada durante el giro para evitar fantasmas ──
                         # (Solo con obstáculos BEV reales — el far_hint NO entra aquí)
@@ -359,6 +371,8 @@ class PPRuntime:
                             # del robot recién en este update -> "ya lo pasé de
                             # verdad", no "dejé de verlo". Dispara RECUPERANDO.
                             pasado = self.memory.last_passed
+                        _t3 = time.perf_counter()
+                        bev_timing["mem"] = (_t3 - _t2) * 1000.0
 
                         # ── Línea de esquina naranja — ver corner_lines.py. Usa
                         # el tracker con persistencia (no detect_lines() cruda)
@@ -414,10 +428,14 @@ class PPRuntime:
                         if bev_obstacles and turn_dir is not None:
                             closest = max(bev_obstacles, key=lambda o: o[1])
                             interior = is_interior_pass(turn_dir, closest[2])
+                        _t4 = time.perf_counter()
+                        bev_timing["line"] = (_t4 - _t3) * 1000.0
 
                         # Detectar centerline (con obstáculos recordados+nuevos,
                         # ya sin los que quedaron más allá de la naranja)
                         path_points = detect_centerline(bev_frame, bev_obstacles, bev_hsv=bev_hsv)
+                        _t5 = time.perf_counter()
+                        bev_timing["dc"] = (_t5 - _t4) * 1000.0
 
                         if len(path_points) >= C.MIN_PATH_PTS:
                             lookahead_eff = self.controller.adaptive_lookahead(
@@ -446,7 +464,8 @@ class PPRuntime:
                                 self.far_hint.reset_all()
                         if pp_active:
                             obs_norm = self.controller.normalize(steer_deg)
-                            
+                        bev_timing["ctrl"] = (time.perf_counter() - _t5) * 1000.0
+
                     except Exception as e:
                         import traceback
                         print(f"[ERROR] {e}", flush=True)
@@ -510,7 +529,7 @@ class PPRuntime:
                 self._annotate(processed_frame, steer_deg, obs_norm,
                             pp_active, len(path_points), positions,
                             serial_msg, fps, len(bev_obstacles),
-                            self.memory.last_prune_reason, timing_ms)
+                            self.memory.last_prune_reason, timing_ms, bev_timing)
 
                 if bev_frame is not None:
                     bev_debug = draw_bev_debug(
