@@ -116,6 +116,13 @@ OBS_BIAS_SHIFT = 28    # desplazamiento lateral para sesgo de color WRO (px)
 #  Rojo  → el robot debe pasar por la DERECHA → se infla más a la izquierda
 #  Verde → el robot debe pasar por la IZQUIERDA → se infla más a la derecha
 
+# Si el lado de paso tiene menos de esto de piso libre real hasta la pared
+# (medido justo más allá del inflado del obstáculo), el sesgo de arriba se
+# reduce proporcionalmente (0 = pegado a la pared, sin sesgo en absoluto;
+# >= esto = sesgo completo) — evita apretar el path contra la pared hacia la
+# que se supone que debe esquivar. Ajustar en pista.
+OBS_BIAS_WALL_NEAR_PX = 45
+
 # ─── Escala única de urgencia por distancia (mm reales) ──────────────────────
 # A esta distancia (o menos) del obstáculo: máxima agresividad de esquiva.
 OBSTACLE_URGENT_MM = 180.0   # 

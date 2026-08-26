@@ -287,6 +287,11 @@ def detect_centerline(
     floor_mask = cv2.morphologyEx(floor_mask, cv2.MORPH_OPEN,  k3)
     floor_mask = cv2.morphologyEx(floor_mask, cv2.MORPH_CLOSE, k5)
 
+    # Distancia de cada pixel de piso (SIN obstáculos aún restados) a la pared/
+    # borde no-piso más cercano — usada abajo para medir cuánto margen real
+    # hay del lado de paso de cada obstáculo, antes de decidir el sesgo WRO.
+    floor_dist = cv2.distanceTransform(floor_mask, cv2.DIST_L2, 5)
+
     # ── 2. Eliminar obstáculos + sesgo de color WRO ───────────────────────────
     free_mask = floor_mask.copy()
     for ox, oy, color in bev_obstacles:
@@ -295,15 +300,28 @@ def detect_centerline(
         # Zona de seguridad simétrica alrededor del obstáculo
         cv2.circle(free_mask, (ix, iy), C.OBS_INFLATE_R, 0, -1)
 
-        # Sesgo asimétrico según reglas WRO de color
+        # Sesgo asimétrico según reglas WRO de color — pero REDUCIDO si el
+        # lado de paso ya está pegado a una pared. Empujar más el hueco hacia
+        # ese lado (bloqueando más el lado contrario) solo tiene sentido si
+        # ahí hay margen real; si no, el efecto es apretar el path contra la
+        # pared en vez de darle más espacio para pasar — justo lo que causaba
+        # que a veces el carro se estrellara contra la pared hacia la que
+        # "esquivaba". Se mide el margen con floor_dist (piso puro, antes de
+        # cualquier círculo de obstáculo) justo más allá del inflado, del
+        # lado de paso, y se escala el shift 0..1 según ese margen.
+        iiy = int(np.clip(iy, 0, h - 1))
         if color == "Red":
-            # Robot debe pasar por la DERECHA → bloquear más a la izquierda del bloque
-            cx_bias = ix - C.OBS_BIAS_SHIFT
-            cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
+            check_x = int(np.clip(ix + C.OBS_INFLATE_R, 0, w - 1))
+            wall_room = float(floor_dist[iiy, check_x])
+            shift = C.OBS_BIAS_SHIFT * min(1.0, wall_room / C.OBS_BIAS_WALL_NEAR_PX)
+            cx_bias = ix - shift
+            cv2.circle(free_mask, (int(round(cx_bias)), iy), C.OBS_INFLATE_R, 0, -1)
         elif color == "Green":
-            # Robot debe pasar por la IZQUIERDA → bloquear más a la derecha del bloque
-            cx_bias = ix + C.OBS_BIAS_SHIFT
-            cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
+            check_x = int(np.clip(ix - C.OBS_INFLATE_R, 0, w - 1))
+            wall_room = float(floor_dist[iiy, check_x])
+            shift = C.OBS_BIAS_SHIFT * min(1.0, wall_room / C.OBS_BIAS_WALL_NEAR_PX)
+            cx_bias = ix + shift
+            cv2.circle(free_mask, (int(round(cx_bias)), iy), C.OBS_INFLATE_R, 0, -1)
 
     # ── 2b. Margen de seguridad contra CUALQUIER borde no-piso (pared incl.) ──
     # distanceTransform da, por pixel libre, la distancia al pixel no-libre
