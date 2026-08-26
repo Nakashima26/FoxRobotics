@@ -168,8 +168,13 @@ def _smooth_x(points, weights=None):
     if weights is not None:
         # Blend: en peso alto confía más en el valor crudo, pero sin
         # abandonar el suavizado del todo (evita que ruido puntual dispare el steer).
+        # 0.7 dejaba pasar casi sin filtrar el ruido fila-a-fila del borde de
+        # la mancha de color del obstáculo (IPM de un objeto cercano/alto no
+        # es una línea recta) justo en la zona de mayor peso -- de ahí el
+        # zigzag pegado al obstáculo. Bajado para filtrar más sin perder
+        # toda la reacción rápida.
         for i, wgt in enumerate(weights):
-            blend = min(1.0, wgt) * 0.7   # máximo 70% crudo, nunca 100%
+            blend = min(1.0, wgt) * 0.35   # máximo 35% crudo, nunca 100%
             xs_s[i] = (1.0 - blend) * xs_s[i] + blend * xs[i]
 
     return [(float(xs_s[i]), points[i][1]) for i in range(n)]
