@@ -54,11 +54,13 @@ class ObstacleMemory:
         self._obs: list[_Obs] = []
         self._prev_heading: float | None = None
         self.last_passed: bool = False   # ver _prune() / update()
+        self.last_prune_reason: str = "-"   # último motivo de poda, para overlay en pantalla
 
     def reset(self):
         self._obs.clear()
         self._prev_heading = None
         self.last_passed = False
+        self.last_prune_reason = "-"
 
     # ── Transformación por movimiento del robot ─────────────────────────────────
 
@@ -164,10 +166,10 @@ class ObstacleMemory:
         passed = False
         for o in self._obs:
             if o.conf < C.OBS_MEM_MIN_CONF:
-                print(f"[MEM] descartado por baja confianza (conf={o.conf:.2f}, y={o.y:.0f}, behind_y={behind_y})", flush=True)
+                self.last_prune_reason = f"BAJA_CONF y={o.y:.0f} conf={o.conf:.2f}"
                 continue                             # perdido de vista, no rebasado
             if o.y > behind_y:                       # ya quedó detrás del robot
-                print(f"[MEM] PASADO real: y={o.y:.0f} > behind_y={behind_y} (conf={o.conf:.2f})", flush=True)
+                self.last_prune_reason = f"PASADO y={o.y:.0f}>{behind_y} conf={o.conf:.2f}"
                 passed = True
                 continue
             if not (0.0 <= o.x < C.BEV_W and 0.0 <= o.y < C.BEV_H):

@@ -205,12 +205,14 @@ class PPRuntime:
         serial_msg:   str,
         fps:          float,
         n_mem:        int,
+        prune_reason: str = "-",
     ):
         lines = [
             f"fps={fps:.1f}  pp={'ON' if pp_active else 'OFF'}  pts={n_path_pts}",
             f"steer={steer_deg:+.1f} deg  obs={obs_norm:+.3f}",
             f"obs_R={len(positions.get('Red', []))}  obs_G={len(positions.get('Green', []))}  mem={n_mem}",
             f"tx: {serial_msg[:55]}",
+            f"mem_prune: {prune_reason}",
         ]
         y = 22
         for txt in lines:
@@ -467,7 +469,8 @@ class PPRuntime:
                 # ── Display ──────────────────────────────────────────────────
                 self._annotate(processed_frame, steer_deg, obs_norm,
                             pp_active, len(path_points), positions,
-                            serial_msg, fps, len(bev_obstacles))
+                            serial_msg, fps, len(bev_obstacles),
+                            self.memory.last_prune_reason)
 
                 if bev_frame is not None:
                     bev_debug = draw_bev_debug(
