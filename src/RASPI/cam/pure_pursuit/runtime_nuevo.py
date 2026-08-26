@@ -148,11 +148,11 @@ class PPRuntime:
     # ── Serial ────────────────────────────────────────────────────────────────
 
     def _build_serial_message(self, obs_norm: float, state: str, n_mem_obs: int,
-                               pasado: bool, interior: bool) -> str:
+                               pasado: bool, interior: bool, target_visible: bool) -> str:
         has_obstacle = n_mem_obs > 0   # basado en memoria real, no en steer
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
                 f"state={state},prio={int(has_obstacle)},mem={n_mem_obs},pp=1,"
-                f"pasado={int(pasado)},intr={int(interior)}")
+                f"pasado={int(pasado)},intr={int(interior)},tgt={int(target_visible)}")
 
     # ── Captura ───────────────────────────────────────────────────────────────
 
@@ -290,6 +290,7 @@ class PPRuntime:
                 line_info     = {"Orange": {"seen": False, "near_y": None}}
                 bev_obstacles_beyond = []
                 interior      = False
+                target_visible = False
 
                 if self.bev.is_calibrated:
                     try:
@@ -314,6 +315,17 @@ class PPRuntime:
                         # (Solo con obstáculos BEV reales — el far_hint NO entra aquí)
                         if self._is_turning:
                             bev_obstacles = []
+                            # ── Corte de giro por visión ──────────────────────
+                            # new_obstacles ya se calculó arriba con el mismo
+                            # map_obstacle_to_bev() de siempre, sin depender de
+                            # _is_turning -- si algo proyectó a una posición BEV
+                            # válida, el chasis ya giró lo suficiente para que
+                            # el próximo obstáculo esté dentro del área
+                            # calibrada de piso (mirando hacia adelante). Se le
+                            # avisa al ESP32 (tgt=1) para que corte el giro
+                            # mecánico ya y le ceda el control a esquiva normal
+                            # en vez de terminar los grados a ciegas.
+                            target_visible = bool(new_obstacles)
                         else:
                             bev_obstacles = self.memory.update(
                                 new_obstacles, dt_s, self._last_heading
@@ -422,7 +434,7 @@ class PPRuntime:
 
                 # ── Construir y enviar mensaje serial ────────────────────────
                 serial_msg = self._build_serial_message(
-                    obs_norm, state, len(bev_obstacles), pasado, interior
+                    obs_norm, state, len(bev_obstacles), pasado, interior, target_visible
                 )
                 self.serial_link.send_line(serial_msg)
                 serial_ack = self.serial_link.try_readline()
