@@ -212,7 +212,12 @@ CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
 # era confiable. Por ahora corner_lines.py solo sigue la línea naranja. Se
 # deja el rango medido (ver [HSV banda debajo de naranja] en runtime_nuevo.py)
 # por si se retoma más adelante, pero detect_lines() ya no lo usa.
-LINE_ORANGE_HSV = [(np.array([7, 90, 150]), np.array([15, 180, 210]))]
+# Value tope subido a 255 (antes 210) para no recortar los reflejos brillantes
+# de la cinta naranja bajo la luz de arena -- esos pixeles recortados hacían que
+# la corrida contigua cruzara/no-cruzara LINE_MIN_RUN_PX frame a frame y
+# 'seen'/near_y parpadearan. Hue se mantiene >=7 para no invadir el rojo de las
+# latas; S y V se abren un poco para tolerar sombra/desgaste de la cinta.
+LINE_ORANGE_HSV = [(np.array([7, 85, 140]), np.array([18, 200, 255]))]
 LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]   # sin usar por ahora
 
 LINE_MIN_RUN_PX   = 8   # ancho mínimo de corrida CONTIGUA en una fila para
@@ -225,9 +230,37 @@ LINE_PROXIMITY_PX = 60   # si el punto más cercano de la línea está a esta
 # línea puede verse inclinada/diagonal en el BEV, no necesariamente horizontal;
 # comparar solo Y contra un obstáculo puede clasificarlo mal si está a una X
 # distinta de por donde se ancló la lectura.
-LINE_FIT_BAND_PX     = 60   # +-px alrededor de near_y de donde se toman pixeles para el ajuste
-LINE_FIT_MIN_POINTS  = 30   # pixeles mínimos en la banda para confiar en la pendiente ajustada;
-                             # si no alcanza, se usa el fallback horizontal (solo Y) de siempre
+LINE_FIT_BAND_PX     = 35   # (antes 60) +-px alrededor de near_y de donde se toman
+                             # pixeles para el ajuste. Más angosto = menos riesgo de
+                             # colar pixeles de OTRO segmento más lejano y torcer la pendiente.
+LINE_FIT_MIN_POINTS  = 70   # (antes 30) pixeles mínimos en la banda para confiar en la
+                             # pendiente ajustada; si no alcanza, se usa el fallback
+                             # horizontal (solo Y). Subido para exigir un segmento bien
+                             # visible antes de comprometerse a una pendiente.
+LINE_FIT_MAX_SLOPE_DEG = 30  # si la recta ajustada queda más inclinada que esto respecto
+                             # a la horizontal se descarta (la línea de esquina en BEV es
+                             # ~perpendicular al avance; un ajuste muy diagonal casi
+                             # siempre es ruido) -> fallback plano en near_y.
+
+# ─── Suavizado temporal de la línea naranja — ver OrangeLineTracker ───────────
+LINE_MASK_CLOSE_KERNEL    = (5, 3)  # cierre morfológico (ancho, alto) sobre la máscara
+                                    # naranja antes del run-length: puentea huecos de
+                                    # 1-3 px por oclusión parcial / sombra para que un
+                                    # segmento real no se parta en dos.
+LINE_TRACK_PERSIST_FRAMES = 3    # frames seguidos que una lectura nueva debe repetirse
+                                 # (mismo 'seen', near_y dentro de tolerancia) antes de
+                                 # aceptarla como estado estable.
+LINE_TRACK_TOLERANCE_PX   = 20   # (antes 15) margen en near_y para seguir contando la
+                                 # misma lectura como "la misma" entre frames.
+LINE_TRACK_HOLD_FRAMES    = 2    # si 'seen' se pierde, cuántos frames se mantiene la
+                                 # última línea estable antes de darla por perdida
+                                 # (absorbe dropouts cortos). 0 = soltar de inmediato.
+LINE_TRACK_NEAR_Y_EMA     = 0.4  # peso de la lectura nueva al mezclar near_y (EMA).
+                                 # 1.0 = sin suavizado. Sube a 0.7 automáticamente cuando
+                                 # la línea se ACERCA (near_y crece) para no frenar un
+                                 # dato relevante para frenar/clasificar.
+LINE_TRACK_LINE_EMA       = 0.35 # idem para los extremos de la recta con pendiente:
+                                 # amortigua el "baile" de la diagonal frame a frame.
 
 # Frames tras TERMINAR un giro durante los cuales NO se filtra por la línea
 # naranja (todo cuenta como "mi recta", sin excepción) — justo al salir de

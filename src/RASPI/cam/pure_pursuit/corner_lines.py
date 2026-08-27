@@ -27,7 +27,13 @@ from . import config as C
 
 def _line_mask(bev_hsv: np.ndarray, ranges) -> np.ndarray:
     masks = [cv2.inRange(bev_hsv, lo, hi) for lo, hi in ranges]
-    return np.bitwise_or.reduce(masks) if len(masks) > 1 else masks[0]
+    mask = np.bitwise_or.reduce(masks) if len(masks) > 1 else masks[0]
+    # Cierre morfológico: puentea huecos de 1-3 px (oclusión parcial por un
+    # obstáculo, sombras) para que un segmento real siga formando una corrida
+    # contigua >= LINE_MIN_RUN_PX -- sin esto 'seen'/near_y brincan entre ese
+    # segmento y otro más lejano por un par de pixeles de diferencia frame a frame.
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, C.LINE_MASK_CLOSE_KERNEL)
+    return cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)
 
 
 def _row_max_runs(mask: np.ndarray) -> np.ndarray:
@@ -85,7 +91,18 @@ def _fit_line_near(mask: np.ndarray, near_y: float, band_px: float,
     if len(xs) < min_points:
         return None
     pts = np.column_stack([xs.astype(np.float32), (ys + y0b).astype(np.float32)])
-    vx, vy, x0, y0 = cv2.fitLine(pts, cv2.DIST_L2, 0, 0.01, 0.01).flatten()
+    # DIST_HUBER (no DIST_L2): mínimos cuadrados le da todo el peso a los
+    # outliers -- unos pocos pixeles de ruido lejos del eje de la línea bastaban
+    # para torcer la pendiente de un frame al siguiente.
+    vx, vy, x0, y0 = cv2.fitLine(pts, cv2.DIST_HUBER, 0, 0.01, 0.01).flatten()
+    # Descarta ajustes demasiado inclinados: la línea de esquina en BEV es
+    # ~perpendicular al avance (casi horizontal). Una pendiente empinada casi
+    # siempre es ruido / pixeles de otro segmento -> que el caller use el
+    # fallback horizontal plano en near_y.
+    ang = abs(float(np.degrees(np.arctan2(float(vy), float(vx)))))
+    ang = min(ang, 180.0 - ang)          # 0 = horizontal, 90 = vertical
+    if ang > C.LINE_FIT_MAX_SLOPE_DEG:
+        return None
     return float(vx), float(vy), float(x0), float(y0)
 
 
@@ -148,19 +165,34 @@ class OrangeLineTracker:
     lectura (mismo 'seen' y near_y dentro de una tolerancia) se repita
     PERSIST_FRAMES seguidos antes de aceptarla como el estado "real" — un
     brinco de un solo frame no alcanza a mover el valor reportado.
+
+    Encima de eso: (1) el near_y aceptado se mezcla por EMA con el anterior
+    (rápido si la línea se acerca, lento si se aleja); (2) los extremos de la
+    recta con pendiente también se suavizan por EMA -> la diagonal deja de
+    "bailar"; (3) si 'seen' se pierde, la última línea se mantiene hold_frames
+    frames antes de soltarla, para absorber dropouts cortos de la máscara.
     """
 
-    def __init__(self, persist_frames: int = 3, tolerance_px: float = 15.0):
+    def __init__(self, persist_frames: int = C.LINE_TRACK_PERSIST_FRAMES,
+                 tolerance_px: float = C.LINE_TRACK_TOLERANCE_PX,
+                 hold_frames: int = C.LINE_TRACK_HOLD_FRAMES,
+                 near_y_ema: float = C.LINE_TRACK_NEAR_Y_EMA,
+                 line_ema: float = C.LINE_TRACK_LINE_EMA):
         self.persist_frames = persist_frames
         self.tolerance_px = tolerance_px
+        self.hold_frames = hold_frames
+        self.near_y_ema = near_y_ema
+        self.line_ema = line_ema
         self.stable: dict = {"seen": False, "near_y": None, "line": None}
         self._candidate: dict | None = None
         self._candidate_count = 0
+        self._lost_count = 0
 
     def reset(self):
         self.stable = {"seen": False, "near_y": None, "line": None}
         self._candidate = None
         self._candidate_count = 0
+        self._lost_count = 0
 
     def _matches_candidate(self, raw: dict) -> bool:
         if self._candidate is None or raw["seen"] != self._candidate["seen"]:
@@ -181,24 +213,82 @@ class OrangeLineTracker:
 
         if self._matches_candidate(raw):
             self._candidate_count += 1
+            # Refrescar el candidato a la lectura MÁS reciente (dentro de
+            # tolerancia): el valor que se acepta al llegar a persist_frames
+            # debe ser el actual, no el primero del tramo -- si no, tras varios
+            # frames acercándose quedaba hasta tolerance_px desfasado.
+            if raw["seen"]:
+                self._candidate = raw
         else:
             self._candidate = raw
             self._candidate_count = 1
 
         if self._candidate_count >= self.persist_frames:
-            self.stable = dict(self._candidate)
-            if self.stable["seen"]:
-                # Ajusta la recta (con pendiente) SOLO una vez que near_y ya
-                # es estable — así el ancla de la banda no "baila" también.
-                mask = _line_mask(bev_hsv, C.LINE_ORANGE_HSV)
-                self.stable["line"] = _fit_line_near(
-                    mask, self.stable["near_y"],
-                    C.LINE_FIT_BAND_PX, C.LINE_FIT_MIN_POINTS,
-                )
-            else:
-                self.stable["line"] = None
+            self._apply_candidate(dict(self._candidate), bev_hsv,
+                                  bev_bgr.shape[1])
 
         return self.stable
+
+    def _apply_candidate(self, cand: dict, bev_hsv: np.ndarray, w: int) -> None:
+        """Acepta la lectura persistida, suavizándola contra el estado previo."""
+        if not cand["seen"]:
+            # 'seen' se perdió de forma persistente. No soltar la línea de
+            # golpe: un dropout corto de la máscara no debe tumbarla. Solo tras
+            # hold_frames frames seguidos así se da por perdida.
+            if self.stable["seen"]:
+                self._lost_count += 1
+                if self._lost_count >= self.hold_frames:
+                    self.stable = {"seen": False, "near_y": None, "line": None}
+                    self._lost_count = 0
+            return
+
+        self._lost_count = 0
+        raw_ny = float(cand["near_y"])
+        if self.stable["seen"] and self.stable["near_y"] is not None:
+            prev_ny = float(self.stable["near_y"])
+            # Y-BEV crece hacia el robot: near_y creciente => el corredor se
+            # acerca (dato para frenar/clasificar) => seguir rápido. Si se
+            # aleja, suele ser ruido / salto a un segmento más lejano => lento.
+            a = 0.7 if raw_ny > prev_ny else self.near_y_ema
+            new_ny = a * raw_ny + (1.0 - a) * prev_ny
+        else:
+            new_ny = raw_ny
+
+        mask = _line_mask(bev_hsv, C.LINE_ORANGE_HSV)
+        fitted = _fit_line_near(mask, new_ny, C.LINE_FIT_BAND_PX,
+                                C.LINE_FIT_MIN_POINTS)
+        self.stable = {
+            "seen": True,
+            "near_y": new_ny,
+            "line": self._smooth_line(fitted, w),
+        }
+
+    def _smooth_line(self, fitted, w: int):
+        """
+        EMA de los extremos de la recta ('y en x=0' / 'y en x=w-1') contra la
+        recta estable anterior -- amortigua el vaivén de pendiente frame a
+        frame. Se usa esa representación (no vx,vy directos) porque cv2.fitLine
+        no fija el signo de (vx,vy). Re-empaqueta como (vx,vy,x0,y0) con x0=0,
+        contrato intacto para line_side_is_near()/HUD.
+        """
+        if fitted is None:
+            return None
+        vx, vy, x0, y0 = fitted
+        if abs(vx) < 1e-6:
+            return fitted
+        slope = vy / vx
+        yl = y0 + (0.0     - x0) * slope
+        yr = y0 + (w - 1.0 - x0) * slope
+
+        prev = self.stable.get("line")
+        if prev is not None and abs(prev[0]) > 1e-6:
+            pslope = prev[1] / prev[0]
+            pyl = prev[3] + (0.0     - prev[2]) * pslope
+            pyr = prev[3] + (w - 1.0 - prev[2]) * pslope
+            yl = self.line_ema * yl + (1.0 - self.line_ema) * pyl
+            yr = self.line_ema * yr + (1.0 - self.line_ema) * pyr
+
+        return (float(w - 1.0), float(yr - yl), 0.0, float(yl))
 
     def classify(self, ox: float, oy: float, robot_x: float, robot_y: float) -> bool | None:
         """
