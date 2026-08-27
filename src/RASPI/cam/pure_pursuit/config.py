@@ -100,16 +100,15 @@ FLOOR_COLOR_RANGES = [
 CENTERLINE_ROW_STEP  = 15    # muestrear cada N filas
 CENTERLINE_MIN_WIDTH = 20    # píxeles mínimos de espacio libre para aceptar fila
 CENTERLINE_TOP_Y     = BEV_H // 3   # no subir más allá de 1/3 de la imagen
-CENTERLINE_RAMP_PX   = 100   # horizonte de anticipo: empieza a abrir el path
+CENTERLINE_RAMP_PX   = 140   # horizonte de anticipo: empieza a abrir el path
                              # hacia el lado de paso a esta distancia Y de la lata.
-                             # DEBE ser >= LOOKAHEAD_PX (100) para que el path ya
-                             # esté comprometido cuando PP alcanza el punto target.
-                             # Estaba en 140: con un obstáculo a ~130-150 px eso
-                             # abría el path DESDE el robot (sin tramo recto) y el
-                             # steer salía muy fuerte y muy temprano -- el "pico".
-                             # A 100 quedan ~2-3 filas rectas antes de abrir.
-                             # Subir si el carro reacciona tarde; bajar (ojo con
-                             # el límite de LOOKAHEAD_PX) si aún abre muy pronto.
+                             # DEBE ser >= LOOKAHEAD_PX para que el path ya esté
+                             # comprometido cuando PP alcanza el punto target.
+                             # (Se probó 100: dejaba SIN pass_cx a las filas justo
+                             # delante del robot -> si ahí no hay piso en el BEV,
+                             # se saltaban y el path pegaba un salto. Con el arco
+                             # de esquiva ya arreglado (pass_cx pegado a la lata +
+                             # continuidad de free_cx), 140 no hace "pico".)
 CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-muestreo
 
 # Zona recta de arranque: en las filas dentro de esta distancia Y del robot, el

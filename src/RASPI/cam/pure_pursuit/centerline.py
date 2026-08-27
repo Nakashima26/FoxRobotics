@@ -91,6 +91,50 @@ def _widest_free_segment(row_mask: np.ndarray, min_width: int) -> int | None:
     return (bounds[0] + bounds[1]) // 2
 
 
+def _row_free_segments(row_mask: np.ndarray, min_width: int) -> list[tuple[int, int]]:
+    """Todos los segmentos libres (izq, der) de ancho >= min_width en la fila."""
+    free_cols = np.where(row_mask > 0)[0]
+    if len(free_cols) < min_width:
+        return []
+    segs: list[tuple[int, int]] = []
+    s = p = int(free_cols[0])
+    for c in free_cols[1:]:
+        ci = int(c)
+        if ci > p + 1:
+            if p - s + 1 >= min_width:
+                segs.append((s, p))
+            s = ci
+        p = ci
+    if p - s + 1 >= min_width:
+        segs.append((s, p))
+    return segs
+
+
+def _continuity_free_cx(row_mask: np.ndarray, min_width: int, x_ref: float) -> int | None:
+    """
+    X del corredor en esta fila SIGUIENDO la continuidad con x_ref (el X del
+    punto anterior del path):
+      - si x_ref cae dentro de un hueco libre >= min_width -> quedarse en x_ref
+        (seguir derecho, sin bandazos);
+      - si x_ref quedó bloqueado (obstáculo/pared) -> el borde del hueco
+        >= min_width más cercano a x_ref.
+
+    Sin esto, free_cx era "el centro del hueco MÁS ANCHO" calculado fila por
+    fila sin memoria: cuando el obstáculo parte el corredor en dos, cuál hueco
+    es "el más ancho" (y dónde queda su centro) saltaba entre filas contiguas
+    -> free_cx teletransportaba ±100 px -> el path zigzagueaba. Siguiendo x_ref
+    el path traza UNA curva continua.
+    """
+    segs = _row_free_segments(row_mask, min_width)
+    if not segs:
+        return None
+    for l, r in segs:
+        if l <= x_ref <= r:
+            return int(round(x_ref))
+    l, r = min(segs, key=lambda s: min(abs(s[0] - x_ref), abs(s[1] - x_ref)))
+    return l if abs(l - x_ref) <= abs(r - x_ref) else r
+
+
 def _ramp_weight(row_y: int, obs_y: float) -> float:
     """
     0 = ignorar la lata (usar centro del pasillo), 1 = lado de paso completo.
@@ -110,31 +154,43 @@ def _ramp_weight(row_y: int, obs_y: float) -> float:
     return max(0.0, 1.0 + (d + full_r) / full_r)
 
 
-def _pass_side_cx(row_mask: np.ndarray, safe_row_mask: np.ndarray, ox: float, color: str) -> int | None:
-    """Centro del hueco libre del lado WRO correcto en esta fila, priorizando piso a distancia segura de la pared."""
-    iox = int(ox)
-    iox = max(0, min(iox, row_mask.shape[0] - 1))
-    pref_min = max(1, C.CENTERLINE_MIN_WIDTH // 2)
+def _pass_side(color: str) -> int:
+    """
+    Lado por el que SIEMPRE se pasa la lata según la regla WRO:
+      Rojo  -> +1 (derecha de la lata)
+      Verde -> -1 (izquierda de la lata)
 
-    if color == "Red":
-        cx_rel = _widest_free_segment(safe_row_mask[iox:], pref_min)
-        if cx_rel is None:
-            cx_rel = _widest_free_segment(row_mask[iox:], pref_min)  # fallback sin margen
-        # Último recurso si ni siquiera row_mask (sin margen) tiene un hueco
-        # ancho: usar OBS_INFLATE_R (radio YA bloqueado alrededor del
-        # obstáculo, físico+seguridad), NUNCA OBS_PHYSICAL_R_PX -- ese es
-        # solo el radio físico de la lata, más chico que lo que free_mask ya
-        # bloqueó, así que ese punto caía DENTRO de la propia zona bloqueada
-        # (el path terminaba apuntando a la lata en vez de esquivarla).
-        return (iox + cx_rel) if cx_rel is not None else iox + C.OBS_INFLATE_R
+    Nunca se invierte: en WRO Future Engineers pasar por el lado equivocado es
+    descalificación directa, y físicamente SIEMPRE hay lugar del lado correcto
+    aunque la cámara/BEV no lo alcance a ver. Si hace falta, el path se traza
+    "por fuera" del piso visible con tal de comprometerse al lado correcto.
+    """
+    return 1 if color == "Red" else -1
 
-    if color == "Green":
-        cx_abs = _widest_free_segment(safe_row_mask[:iox], pref_min)
-        if cx_abs is None:
-            cx_abs = _widest_free_segment(row_mask[:iox], pref_min)
-        return cx_abs if cx_abs is not None else iox - C.OBS_INFLATE_R
 
-    return None
+def _pass_side_cx(ox: float, side: int, w: int) -> int:
+    """
+    X objetivo para pasar el obstáculo -- PEGADO a la lata, a un pelo afuera del
+    círculo de inflado (OBS_INFLATE_R = radio físico + seguridad), del lado WRO
+    `side` (+1 derecha / -1 izquierda).
+
+    Antes se devolvía "el centro del hueco de ese lado": si la lata estaba cerca
+    de la pared ese hueco era un filo y su centro quedaba contra la pared -> el
+    blend clavaba el path ahí (reacción exagerada) y ese valor saltaba fila a
+    fila según el ancho del filo (zigzag). Un offset FIJO desde la lata da un
+    arco de esquiva suave y consistente, con el mismo margen de siempre.
+
+    Se clampa solo a los bordes de la imagen: si el punto correcto cae donde el
+    BEV no ve piso, IGUAL se apunta ahí -- el path se compromete al lado WRO y
+    _enforce_free_mask() no lo cruza al otro lado (ver ahí).
+    """
+    iox = max(0, min(int(round(ox)), w - 1))
+    # OBS_INFLATE_R (físico + seguridad) + WALL_MARGIN_PX = MISMA holgura que
+    # safe_mask deja alrededor de la lata. Así el path de esquiva pasa con el
+    # mismo aire que el corredor normal -- no más ajustado (no empeora la
+    # seguridad de la esquiva) ni innecesariamente ancho (no dispara el steer).
+    off = C.OBS_INFLATE_R + C.WALL_MARGIN_PX
+    return int(min(max(iox + off * side, 0), w - 1))
 
 
 def _wall_urgency_cx(row_mask: np.ndarray, side: int) -> int | None:
@@ -209,22 +265,33 @@ def _limit_lateral_step(points: list[tuple[float, int]], weights: list[float] | 
     return out
 
 
-def _enforce_free_mask(points: list[tuple[float, int]], free_mask: np.ndarray, w: int) -> list[tuple[float, int]]:
-    """
-    Red de seguridad final: garantiza que NINGÚN punto del path termine
-    sobre un pixel bloqueado (obstáculo o pared), sin importar qué le haya
-    pasado en el post-procesado (_smooth_x/_limit_lateral_step). Se corre
-    DESPUÉS de todo eso porque el suavizado promedia con filas vecinas sin
-    ninguna noción de qué está bloqueado, y puede jalar un punto que ya se
-    había verificado seguro fila por fila de vuelta hacia una zona bloqueada
-    (confirmado con pruebas: pasaba incluso sin ninguna atenuación por
-    confianza de por medio).
+def _dominant_pass(y: int, bev_obstacles: list, pass_sides: list[int]) -> tuple[int, float] | None:
+    """(side, ox) del obstáculo que domina la esquiva en la fila y, o None si a
+    esa altura no hay una esquiva comprometida (peso de rampa < 0.5)."""
+    best_w, best = 0.0, None
+    for (ox, oy, _c), side in zip(bev_obstacles, pass_sides):
+        wgt = _ramp_weight(y, oy)
+        if wgt > best_w:
+            best_w, best = wgt, (side, float(ox))
+    return best if best_w >= 0.5 else None
 
-    Si un punto cae en zona bloqueada, se mueve al pixel libre más cercano
-    de ESA fila (en cualquier dirección) — ya no hay contexto de "hacia
-    qué lado" a esta altura del pipeline, así que simplemente el más
-    cercano. Si la fila no tiene NADA libre, se deja tal cual (no hay a
-    dónde moverlo).
+
+def _enforce_free_mask(points: list[tuple[float, int]], free_mask: np.ndarray, w: int,
+                       bev_obstacles: list, pass_sides: list[int]) -> list[tuple[float, int]]:
+    """
+    Red de seguridad final: ningún punto del path debe terminar sobre un pixel
+    bloqueado (obstáculo o pared) tras el post-procesado (_smooth_x promedia con
+    filas vecinas sin noción de OBS_INFLATE_R y puede jalar un punto seguro de
+    vuelta a la zona bloqueada).
+
+    Al reubicar un punto bloqueado:
+      - si a esa altura hay una esquiva comprometida (ver _dominant_pass), se
+        busca piso libre SOLO pasada la lata, del LADO WRO -- nunca se cruza al
+        lado equivocado (= descalificación). Si el BEV no ve piso de ese lado,
+        el punto se fija a la distancia de seguridad del lado correcto: el path
+        se traza "por fuera" del piso visible, comprometido al lado WRO.
+      - si no hay esquiva activa (corredor normal), al pixel libre más cercano
+        en cualquier dirección, como siempre.
     """
     fixed: list[tuple[float, int]] = []
     for x, y in points:
@@ -233,6 +300,20 @@ def _enforce_free_mask(points: list[tuple[float, int]], free_mask: np.ndarray, w
             fixed.append((x, y))
             continue
         free_cols = np.where(free_mask[y, :] > 0)[0]
+
+        dom = _dominant_pass(int(y), bev_obstacles, pass_sides)
+        if dom is not None:
+            side, ox = dom
+            edge = int(round(ox + side * (C.OBS_INFLATE_R + C.WALL_MARGIN_PX)))  # holgura = safe_mask, lado WRO
+            if free_cols.size:
+                pass_cols = free_cols[(free_cols.astype(np.int64) - edge) * side >= 0]
+                if pass_cols.size:
+                    nearest = pass_cols[np.argmin(np.abs(pass_cols.astype(np.int64) - xi))]
+                    fixed.append((float(nearest), y))
+                    continue
+            fixed.append((float(np.clip(edge, 0, w - 1)), y))    # sin piso visible del lado WRO
+            continue
+
         if free_cols.size == 0:
             fixed.append((x, y))
             continue
@@ -348,23 +429,20 @@ def detect_centerline(
     floor_mask = cv2.morphologyEx(floor_mask, cv2.MORPH_OPEN,  k3)
     floor_mask = cv2.morphologyEx(floor_mask, cv2.MORPH_CLOSE, k5)
 
-    # ── 2. Eliminar obstáculos + sesgo de color WRO ───────────────────────────
-    free_mask = floor_mask.copy()
-    for ox, oy, color in bev_obstacles:
-        ix, iy = int(round(ox)), int(round(oy))
+    # ── 2. Lado de paso por obstáculo -- SIEMPRE el lado WRO (Rojo derecha,
+    #    Verde izquierda). Nunca se invierte (ver _pass_side()). +1 / -1.
+    pass_sides = [_pass_side(color) for (_ox, _oy, color) in bev_obstacles]
 
+    # ── 2a. Eliminar obstáculos + sesgo hacia el lado de paso ─────────────────
+    free_mask = floor_mask.copy()
+    for (ox, oy, _color), side in zip(bev_obstacles, pass_sides):
+        ix, iy = int(round(ox)), int(round(oy))
         # Zona de seguridad simétrica alrededor del obstáculo
         cv2.circle(free_mask, (ix, iy), C.OBS_INFLATE_R, 0, -1)
-
-        # Sesgo asimétrico según reglas WRO de color
-        if color == "Red":
-            # Robot debe pasar por la DERECHA → bloquear más a la izquierda del bloque
-            cx_bias = ix - C.OBS_BIAS_SHIFT
-            cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
-        elif color == "Green":
-            # Robot debe pasar por la IZQUIERDA → bloquear más a la derecha del bloque
-            cx_bias = ix + C.OBS_BIAS_SHIFT
-            cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
+        # Círculo de sesgo en el lado OPUESTO al de paso: bloquea más de ese
+        # lado para empujar el path hacia el lado de paso WRO.
+        cx_bias = ix - side * C.OBS_BIAS_SHIFT
+        cv2.circle(free_mask, (cx_bias, iy), C.OBS_INFLATE_R, 0, -1)
 
     # ── 2b. Margen de seguridad contra CUALQUIER borde no-piso (pared incl.) ──
     # distanceTransform da, por pixel libre, la distancia al pixel no-libre
@@ -431,18 +509,17 @@ def detect_centerline(
     y_start = min(h - 10, C.ROBOT_BEV_Y - C.CENTERLINE_ROW_STEP)
     for y in range(y_start, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
         row = free_mask[y, :]
+        # X del último punto ya comprometido (o el ancla del robot en la 1ra
+        # fila). Es la referencia de CONTINUIDAD para elegir hueco -- ver
+        # _continuity_free_cx(). Se mantiene aunque una fila se saltee.
+        prev_cx = float(points[-1][0])
 
-        safe_bounds = _widest_free_segment_bounds(safe_mask[y, :], C.CENTERLINE_MIN_WIDTH)
-        if safe_bounds is not None:
-            edge_hist.append((y, safe_bounds[0], safe_bounds[1]))
-            free_cx = (safe_bounds[0] + safe_bounds[1]) // 2
-        else:
-            free_cx = _widest_free_segment(row, C.CENTERLINE_MIN_WIDTH)
-
+        # ── Obstáculo(s): peso de rampa + X objetivo de paso (ANTES de free_cx,
+        #    para poder sesgar la elección de hueco hacia el lado de paso) ──
         best_w = 0.0
         pass_cx: int | None = None
         best_ox: float | None = None
-        best_color: str | None = None
+        best_side: int = 0
         for idx, (ox, oy, color) in enumerate(bev_obstacles):
             if color not in ("Red", "Green"):
                 continue
@@ -455,12 +532,25 @@ def detect_centerline(
             # basado en una posición cada vez más especulativa.
             wgt = _ramp_weight(y, oy) * conf
             if wgt > best_w:
-                cx_side = _pass_side_cx(row, safe_mask[y, :], ox, color)
-                if cx_side is not None:
-                    best_w = wgt
-                    pass_cx = cx_side
-                    best_ox = ox
-                    best_color = color
+                best_w = wgt
+                pass_cx = _pass_side_cx(ox, pass_sides[idx], w)
+                best_ox = ox
+                best_side = pass_sides[idx]
+
+        # ── "Corredor" de la fila, CON CONTINUIDAD ──
+        # free_cx = seguir derecho desde el punto anterior (prev_cx) si ese X
+        # sigue libre; si quedó bloqueado, el borde del hueco más cercano. NO
+        # "el centro del hueco más ancho" (eso saltaba entre las dos ramas que
+        # deja un obstáculo -> zigzag). El desvío hacia el lado de paso lo
+        # aporta pass_cx en el blend, no free_cx.
+        free_cx = _continuity_free_cx(safe_mask[y, :], C.CENTERLINE_MIN_WIDTH, prev_cx)
+        if free_cx is None:
+            free_cx = _continuity_free_cx(row, C.CENTERLINE_MIN_WIDTH, prev_cx)
+        # edge_hist (predicción de pared en filas sin piso) sigue usando el
+        # hueco ANCHO real -- es información de geometría, no de trayectoria.
+        wide = _widest_free_segment_bounds(safe_mask[y, :], C.CENTERLINE_MIN_WIDTH)
+        if wide is not None:
+            edge_hist.append((y, wide[0], wide[1]))
 
         # Urgencia frontal por pared tiene prioridad sobre el sesgo de color
         # WRO — aquí no hay tiempo para respetar el lado de paso de una lata,
@@ -508,6 +598,14 @@ def detect_centerline(
             # que hay que cerrar el giro más de lo que el hueco visible
             # todavía sugiere.
             if bev_obstacles:
+                # Cerca del robot, "sin nada de piso" suele ser borde del warp
+                # / sombra, NO una pared -> no dejar un hueco en el path: seguir
+                # derecho desde donde venía (prev_cx). Más arriba sí se deja
+                # saltar la fila (ahí un vacío sí puede ser pared real y el
+                # blend/edge_hist de las filas con dato lo resuelven).
+                if (C.ROBOT_BEV_Y - y) < C.CENTERLINE_BASE_STRAIGHT_PX:
+                    points.append((prev_cx, y))
+                    weights.append(0.0)
                 continue
 
             if len(edge_hist) >= 2:
@@ -549,21 +647,18 @@ def detect_centerline(
             cx = (1.0 - best_w) * float(free_cx) + best_w * float(pass_cx)
 
             # El blend también puede quedar del lado INCORRECTO del obstáculo
-            # (transitable, pero violando la regla de color WRO) si free_cx
-            # -el hueco más ancho de la fila, sin noción de lado- cae del
-            # lado contrario a pass_cx y pesa más en el promedio. La
-            # corrección es PROPORCIONAL a best_w (no un clamp duro a
-            # best_ox): con best_w alto (obstáculo cerca y/o confianza alta)
-            # corrige fuerte, hasta comprometerse por completo al lado
-            # correcto; con best_w bajo (aún lejos y/o confianza baja tras
-            # varios frames sin verse de verdad), corrige poco y deja que el
-            # corredor natural (free_cx, ya de por sí seguro) mande — un
-            # clamp duro aquí anulaba por completo la atenuación de arriba,
-            # porque SIEMPRE forzaba hasta best_ox sin importar qué tan chico
-            # fuera best_w.
-            if best_color == "Red" and cx < best_ox:
+            # (transitable, pero violando el lado de paso elegido) si free_cx
+            # -el hueco de la fila- cae del lado contrario a pass_cx y pesa más
+            # en el promedio. La corrección es PROPORCIONAL a best_w (no un
+            # clamp duro a best_ox): con best_w alto (obstáculo cerca y/o
+            # confianza alta) corrige fuerte, hasta comprometerse por completo
+            # al lado correcto; con best_w bajo corrige poco y deja que el
+            # corredor natural (free_cx) mande -- un clamp duro anulaba por
+            # completo la atenuación de arriba. best_side (+1 der / -1 izq) es
+            # el lado WRO (ver _pass_side()).
+            if best_side > 0 and cx < best_ox:
                 cx = cx + (best_ox - cx) * best_w
-            elif best_color == "Green" and cx > best_ox:
+            elif best_side < 0 and cx > best_ox:
                 cx = cx - (cx - best_ox) * best_w
 
             # El blend (ya corregido de lado) puede caer DENTRO de la zona
@@ -610,7 +705,7 @@ def detect_centerline(
         # FINAL, después de todo el post-procesado, es la única garantía
         # real (confirmado con pruebas: sin esto había puntos invadiendo la
         # zona de seguridad incluso con confianza plena).
-        points = _enforce_free_mask(points, free_mask, w)
+        points = _enforce_free_mask(points, free_mask, w, bev_obstacles, pass_sides)
         # El ancla es la posición del robot (un hecho, no una medición): ni el
         # suavizado ni la red de seguridad la corren de ahí.
         points[0] = (float(C.ROBOT_BEV_X), float(C.ROBOT_BEV_Y))
