@@ -223,8 +223,8 @@ def _enforce_free_mask(points: list[tuple[float, int]], free_mask: np.ndarray, w
     Si un punto cae en zona bloqueada, se mueve al pixel libre más cercano
     de ESA fila (en cualquier dirección) — ya no hay contexto de "hacia
     qué lado" a esta altura del pipeline, así que simplemente el más
-    cercano. Si la fila no tiene NADA libre, se deja tal cual (no hay a
-    dónde moverlo).
+    cercano. Si la fila no tiene NADA libre, hereda el X del punto previo
+    (continuidad) en vez de conservar un valor de post-procesado ciego.
     """
     fixed: list[tuple[float, int]] = []
     for x, y in points:
@@ -234,7 +234,9 @@ def _enforce_free_mask(points: list[tuple[float, int]], free_mask: np.ndarray, w
             continue
         free_cols = np.where(free_mask[y, :] > 0)[0]
         if free_cols.size == 0:
-            fixed.append((x, y))
+            # Fila entera bloqueada: no hay a dónde mover el punto con
+            # sentido -> heredar el X del punto previo (continuidad).
+            fixed.append((fixed[-1][0] if fixed else float(C.ROBOT_BEV_X), y))
             continue
         nearest = free_cols[np.argmin(np.abs(free_cols.astype(np.int64) - xi))]
         fixed.append((float(nearest), y))
@@ -433,19 +435,12 @@ def detect_centerline(
     # del eje del robot son las más ruidosas (borde del BEV, sombra del chasis).
     points: list[tuple[float, int]] = [(float(C.ROBOT_BEV_X), C.ROBOT_BEV_Y)]
     weights: list[float] = [0.0]
-    # Historial de bordes (y, izq, der) del hueco safe_mask en filas con dato
-    # real -- permite, cuando una fila más adelante se queda sin piso, AJUSTAR
-    # la tendencia del borde que se está cerrando y proyectarla hacia
-    # adelante, en vez de reaccionar solo a lo que ya es visible (ver rama
-    # "sin piso" más abajo).
-    edge_hist: list[tuple[int, int, int]] = []
     y_start = min(h - 10, C.ROBOT_BEV_Y - C.CENTERLINE_ROW_STEP)
     for y in range(y_start, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
         row = free_mask[y, :]
 
         safe_bounds = _widest_free_segment_bounds(safe_mask[y, :], C.CENTERLINE_MIN_WIDTH)
         if safe_bounds is not None:
-            edge_hist.append((y, safe_bounds[0], safe_bounds[1]))
             free_cx = (safe_bounds[0] + safe_bounds[1]) // 2
         else:
             free_cx = _widest_free_segment(row, C.CENTERLINE_MIN_WIDTH)
@@ -487,67 +482,36 @@ def detect_centerline(
             continue
 
         if free_cx is None and pass_cx is None:
-            # Sin hueco válido en esta fila: no dejar un vacío en el path —
-            # usar el pixel con mayor margen de seguridad (distanceTransform),
-            # que ya calculamos arriba para safe_mask.
+            # Sin hueco válido (>= CENTERLINE_MIN_WIDTH) en esta fila.
             row_dist = dist[y, :]
             if row_dist.max() > 0:
+                # Aún hay pixeles libres sueltos (hueco angosto): usar el de
+                # mayor margen (distanceTransform). weight = best_w (0 sin
+                # obstáculo) -> _smooth_x lo alisa, no genera pico.
                 cx_fallback = float(np.argmax(row_dist))
                 points.append((float(np.clip(cx_fallback, 0, w - 1)), y))
                 weights.append(best_w)
                 continue
 
-            # Fila SIN NADA de piso detectado (viendo la pared casi de frente
-            # / ángulo muy oblicuo — dist.max()==0 significa que ni siquiera
-            # hay un pixel libre en toda la fila, no hay CÓMO saber dónde
-            # está el hueco a esta distancia específica).
+            # Fila SIN NI UN pixel de piso: pared de frente / fin del piso
+            # visible / ángulo muy oblicuo.
             #
-            # Igual que la urgencia frontal (2c): con un obstáculo de color
-            # activo, "sin piso" puede ser el untado de su color en el BEV
-            # (objeto con altura cerca de la cámara), no una pared real — y
-            # edge_hist se construye del mismo safe_mask, así que heredaría
-            # ese mismo error. Sin obstáculo, sí se puede confiar en que es
-            # pared real y ajustar/proyectar su tendencia.
-            #
-            # No basta con comprometerse "a ciegas" al lado que ya se sabía
-            # abierto: la pared sigue una recta, y si ya se detectó que un
-            # borde se viene cerrando fila a fila, esa MISMA tendencia sigue
-            # más adelante -- se ajusta su pendiente con las dos últimas
-            # lecturas reales (edge_hist) y se proyecta hacia esta fila,
-            # aplicando el margen de seguridad contra la posición PREDICHA de
-            # la pared (no solo la visible). Esto es lo que permite anticipar
-            # que hay que cerrar el giro más de lo que el hueco visible
-            # todavía sugiere.
+            # Con un obstáculo de color activo esto suele ser su color untado
+            # en el BEV por la homografía (objeto con altura cerca de la
+            # cámara), NO una pared real: se salta la fila y se sigue
+            # muestreando más arriba, como antes.
             if bev_obstacles or suppress_wall_urgency:
                 continue
 
-            if len(edge_hist) >= 2:
-                (y1, l1, r1), (y2, l2, r2) = edge_hist[-2], edge_hist[-1]
-                dy = y2 - y1
-                dl = (l2 - l1) / dy if dy != 0 else 0.0
-                dr = (r2 - r1) / dy if dy != 0 else 0.0
-                if abs(dr) >= abs(dl):
-                    # Borde DERECHO cerrándose -> pared a la derecha.
-                    predicted_r = r2 + dr * (y - y2)
-                    cx_pred = predicted_r - C.WALL_MARGIN_PX
-                else:
-                    # Borde IZQUIERDO cerrándose -> pared a la izquierda.
-                    predicted_l = l2 + dl * (y - y2)
-                    cx_pred = predicted_l + C.WALL_MARGIN_PX
-                points.append((float(np.clip(cx_pred, 0, w - 1)), y))
-                weights.append(1.0)
-                continue
-
-            # Sin historial suficiente para ajustar una tendencia (p.ej. la
-            # primera fila ya sale sin piso): comprometerse al lado que ya se
-            # sabía abierto, con máxima urgencia, como red de seguridad.
-            if points:
-                last_x, _last_y = points[-1]
-                side = -1 if last_x < C.ROBOT_BEV_X else 1
-                cx_extrap = 0.0 if side < 0 else float(w - 1)
-                points.append((cx_extrap, y))
-                weights.append(1.0)
-            continue
+            # Sin obstáculo, "sin piso" sí es el fin real de la información
+            # fiable. Antes aquí se extrapolaba el borde de pared (edge_hist)
+            # o se clavaba el punto al borde de la imagen, SIEMPRE con
+            # weight=1.0 -- y ese weight hacía que _limit_lateral_step (cap
+            # x1.6) y _smooth_x (35% crudo) no lo filtraran: ese era el "pico"
+            # al final del path. Ahora se corta el path en la última fila con
+            # piso real; PP usa lo que haya (si llega a MIN_PATH_PTS) y su
+            # lookahead casi siempre cae dentro de esta zona.
+            break
 
         if free_cx is None:
             assert pass_cx is not None
@@ -653,6 +617,21 @@ def draw_bev_debug(
     """
     out = bev_bgr.copy()
 
+    # ── Debug "se abre / pico": tinte tenue del piso detectado ────────────────
+    # Donde el verde se acaba es donde se acaba el "segmento libre" que
+    # detect_centerline() usa como línea central -> si eso lo corta el abanico
+    # de FOV / una sombra (y no una pared), ahí nace la deriva.
+    try:
+        _hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
+        _floor = np.zeros(_hsv.shape[:2], dtype=np.uint8)
+        for _lo, _hi in C.FLOOR_COLOR_RANGES:
+            _floor |= cv2.inRange(_hsv, _lo, _hi)
+        _tint = out.copy()
+        _tint[_floor > 0] = (0, 160, 0)
+        out = cv2.addWeighted(out, 0.85, _tint, 0.15, 0)
+    except Exception:
+        pass
+
     # Líneas de esquina
     if line_info:
         h, w = out.shape[:2]
@@ -697,6 +676,17 @@ def draw_bev_debug(
         cv2.polylines(out, [pts_arr], False, (0, 220, 220), 2)
     for pt in path_points:
         cv2.circle(out, pt, 3, (0, 220, 220), -1)
+
+    # Punto de corte del path (fila más adelante alcanzada). Con el fix, el
+    # path se trunca en la última fila con piso real en vez de extrapolar un
+    # "pico". Si 'cut y' queda muy por encima de 'top', el piso se está
+    # acabando antes de CENTERLINE_TOP_Y (deriva/FOV), no es la config.
+    if len(path_points) >= 2:
+        _cut = min(path_points, key=lambda p: p[1])
+        cv2.circle(out, (int(_cut[0]), int(_cut[1])), 7, (255, 0, 255), 2)
+        cv2.putText(out, f"cut y={int(_cut[1])} (top={C.CENTERLINE_TOP_Y})",
+                    (6, out.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.42,
+                    (255, 0, 255), 1)
 
     # Punto look-ahead — solo cuando PP está activo (evita mostrar punto obsoleto en modo fallback)
     if lookahead_pt is not None and pp_active:
