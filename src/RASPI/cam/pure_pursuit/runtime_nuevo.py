@@ -555,23 +555,6 @@ class PPRuntime:
                         line_info=line_info,
                         bev_obstacles_beyond=bev_obstacles_beyond,
                     )
-
-                    # ── DIAG TEMPORAL (quitar después): primeros puntos del path
-                    #    + punto lookahead + n. Para ver de dónde nace el path y
-                    #    qué punto está eligiendo el controlador como target.
-                    def _pp(i):
-                        return f"({path_points[i][0]},{path_points[i][1]})" if i < len(path_points) else "-"
-                    _la = f"({int(lookahead_pt[0])},{int(lookahead_pt[1])})" if lookahead_pt else "-"
-                    _hh = bev_debug.shape[0]
-                    cv2.putText(bev_debug, f"p0={_pp(0)} p1={_pp(1)} p2={_pp(2)}",
-                                (4, _hh - 24), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (0, 0, 0), 3)
-                    cv2.putText(bev_debug, f"p0={_pp(0)} p1={_pp(1)} p2={_pp(2)}",
-                                (4, _hh - 24), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (255, 255, 255), 1)
-                    cv2.putText(bev_debug, f"LA={_la}  n={len(path_points)}  robot=({C.ROBOT_BEV_X},{C.ROBOT_BEV_Y})",
-                                (4, _hh - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (0, 0, 0), 3)
-                    cv2.putText(bev_debug, f"LA={_la}  n={len(path_points)}  robot=({C.ROBOT_BEV_X},{C.ROBOT_BEV_Y})",
-                                (4, _hh - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (255, 255, 255), 1)
-
                     bev_h = processed_frame.shape[0]
                     bev_small = cv2.resize(bev_debug, (bev_h, bev_h))
                     combined = np.hstack([processed_frame, bev_small])
