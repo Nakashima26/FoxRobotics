@@ -75,6 +75,26 @@ class PurePursuitController:
         if not path_points:
             return 0.0, (float(robot_x), float(robot_y))
 
+        # NOTA: el sesgo de paso WRO (pasar a la derecha del rojo / izquierda
+        # del verde) ya está horneado DENTRO de path_points por
+        # centerline.py (_pass_side_cx + blend por best_w) -- este método NO
+        # necesita buscar el punto "más lateral posible" para respetarlo.
+        #
+        # Antes, con bev_obstacles, se elegía el candidato con mayor
+        # |offset_x| dentro del anillo de lookahead. Eso agarraba con la
+        # misma prioridad un pico real de esquiva Y un pico de RUIDO de una
+        # sola fila (p.ej. cuando el hueco libre más ancho de esa fila cae
+        # del lado contrario al reglamentario y el "probe" que empuja cx
+        # hacia el lado correcto tiene que recorrer mucho para salir de la
+        # zona bloqueada -- ver _enforce_free_mask/blend en centerline.py).
+        # Ese pico sobrevive el suavizado y termina siendo el target, dando
+        # un steer pegado al límite mecánico y un lookahead visualmente
+        # "colgado" del resto del path.
+        #
+        # Selección por distancia más cercana al lookahead ideal (igual que
+        # la rama sin obstáculos) es robusta a ese ruido: un solo punto
+        # desviado no gana solo por ser el más lateral, tiene que además
+        # caer a la distancia correcta.
         if bev_obstacles:
             lo, hi = lookahead_px * 0.85, lookahead_px * 1.25
             candidates = [
@@ -82,7 +102,10 @@ class PurePursuitController:
                 if lo <= math.hypot(pt[0] - robot_x, pt[1] - robot_y) <= hi
             ]
             if candidates:
-                target = max(candidates, key=lambda pt: abs(pt[0] - robot_x))
+                target = min(
+                    candidates,
+                    key=lambda pt: abs(math.hypot(pt[0] - robot_x, pt[1] - robot_y) - lookahead_px),
+                )
             else:
                 target = path_points[-1]
                 for pt in path_points:
