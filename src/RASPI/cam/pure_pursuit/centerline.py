@@ -295,6 +295,7 @@ def detect_centerline(
     bev_obstacles: list[tuple[float, float, str]],
     bev_hsv: np.ndarray | None = None,
     obstacle_conf: list[float] | None = None,
+    suppress_wall_urgency: bool = False,
 ) -> list[tuple[int, int]]:
     """
     Detecta la línea central del corredor en la imagen BEV.
@@ -323,6 +324,15 @@ def detect_centerline(
                      físico (OBS_INFLATE_R, más abajo) -- ese se mantiene
                      completo siempre, sin importar la confianza; solo
                      atenúa cuánto se abre el path hacia el lado preferido.
+      suppress_wall_urgency: apaga la "urgencia frontal por pared" (2c) y su
+                     predicción de borde, aunque bev_obstacles esté vacío.
+                     Úsalo en el cooldown justo después de que un obstáculo
+                     se pase (pasado=True) — su mancha de color por
+                     homografía sigue siendo visible en cámara un par de
+                     frames más aunque la memoria ya lo haya soltado
+                     (bev_obstacles vacío), y sin esto esa mancha puede
+                     disparar el mismo falso "hay pared" que ya se evita
+                     mientras el obstáculo SÍ está en bev_obstacles.
 
     Retorna lista de (x, y) en coordenadas BEV, ordenada de abajo (robot)
     hacia arriba (adelante).  Lista vacía si no hay suficiente piso visible.
@@ -397,6 +407,7 @@ def detect_centerline(
     front_band = free_mask[y_front_top:C.ROBOT_BEV_Y, x_lo:x_hi]
     front_blocked = (
         not bev_obstacles
+        and not suppress_wall_urgency
         and front_band.size > 0
         and bool(np.any(front_band == 0))
     )
@@ -499,7 +510,7 @@ def detect_centerline(
             # la pared (no solo la visible). Esto es lo que permite anticipar
             # que hay que cerrar el giro más de lo que el hueco visible
             # todavía sugiere.
-            if bev_obstacles:
+            if bev_obstacles or suppress_wall_urgency:
                 continue
 
             if len(edge_hist) >= 2:

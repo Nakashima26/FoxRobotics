@@ -127,6 +127,7 @@ class PPRuntime:
         self._is_turning: bool = False
         self._turn_start_t: float | None = None
         self._turn_recovery_frames: int = 0
+        self._obs_passed_cooldown: int = 0   # ver suppress_wall_urgency en detect_centerline()
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
@@ -377,8 +378,23 @@ class PPRuntime:
                             # del robot recién en este update -> "ya lo pasé de
                             # verdad", no "dejé de verlo". Dispara RECUPERANDO.
                             pasado = self.memory.last_passed
+                            if pasado:
+                                # Arranca (o reinicia) el cooldown de urgencia
+                                # frontal por pared -- ver suppress_wall_urgency
+                                # en detect_centerline(). La mancha de color del
+                                # objeto que se acaba de pasar sigue siendo
+                                # visible en cámara unos frames más aunque la
+                                # memoria ya lo haya soltado (bev_obstacles
+                                # vacío), y sin este cooldown esa mancha puede
+                                # disparar un falso "hay pared" justo cuando ya
+                                # no hay nada bloqueando esa lógica.
+                                self._obs_passed_cooldown = C.OBS_PASSED_COOLDOWN_FRAMES
                         _t3 = time.perf_counter()
                         bev_timing["mem"] = (_t3 - _t2) * 1000.0
+
+                        suppress_wall_urgency = self._obs_passed_cooldown > 0
+                        if self._obs_passed_cooldown > 0:
+                            self._obs_passed_cooldown -= 1
 
                         # ── Línea de esquina naranja — ver corner_lines.py. Usa
                         # el tracker con persistencia (no detect_lines() cruda)
@@ -449,7 +465,8 @@ class PPRuntime:
                         # Detectar centerline (con obstáculos recordados+nuevos,
                         # ya sin los que quedaron más allá de la naranja)
                         path_points = detect_centerline(
-                            bev_frame, bev_obstacles, bev_hsv=bev_hsv, obstacle_conf=obstacle_conf
+                            bev_frame, bev_obstacles, bev_hsv=bev_hsv, obstacle_conf=obstacle_conf,
+                            suppress_wall_urgency=suppress_wall_urgency,
                         )
                         _t5 = time.perf_counter()
                         bev_timing["dc"] = (_t5 - _t4) * 1000.0
