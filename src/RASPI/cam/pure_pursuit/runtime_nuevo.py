@@ -405,21 +405,24 @@ class PPRuntime:
                         bev_obstacles_beyond = []
                         orange_info = line_info["Orange"]
                         if orange_info["seen"] and not en_recuperacion_giro:
-                            bev_obstacles_mine = []
-                            conf_mine = []
-                            # zip con obstacle_conf para que el filtrado no
-                            # desalinee las confianzas respecto a bev_obstacles
-                            # (mismo índice = mismo obstáculo).
-                            for o, c in zip(bev_obstacles, obstacle_conf):
-                                if self.line_tracker.classify(
-                                    o[0], o[1], C.ROBOT_BEV_X, C.ROBOT_BEV_Y
-                                ) is False:
-                                    bev_obstacles_beyond.append(o)
-                                else:
-                                    bev_obstacles_mine.append(o)
-                                    conf_mine.append(c)
-                            bev_obstacles = bev_obstacles_mine
-                            obstacle_conf = conf_mine
+                            # Clasificación PEGAJOSA por objeto (ver
+                            # ObstacleMemory.classify_and_split()) -- una vez
+                            # que un objeto se clasifica "mío" o "más allá",
+                            # no se reevalúa frame a frame. Antes se
+                            # reclasificaba cada frame contra la posición
+                            # actual, y ruido momentáneo en esa posición
+                            # (justo cuando la línea se estabiliza) podía
+                            # voltear la clasificación de un objeto que ya se
+                            # estaba esquivando a medias -- abandonando y
+                            # retomando la esquiva a mitad de la maniobra
+                            # (confirmado en pista).
+                            bev_obstacles, bev_obstacles_beyond, obstacle_conf = (
+                                self.memory.classify_and_split(
+                                    lambda ox, oy: self.line_tracker.classify(
+                                        ox, oy, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
+                                    )
+                                )
+                            )
 
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
                         # persistencia, ver TurnDirectionTracker) de la posición

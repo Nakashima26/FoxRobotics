@@ -28,13 +28,20 @@ from . import config as C
 
 
 class _Obs:
-    __slots__ = ("x", "y", "color", "conf")
+    __slots__ = ("x", "y", "color", "conf", "beyond")
 
     def __init__(self, x: float, y: float, color: str, conf: float):
         self.x = x
         self.y = y
         self.color = color
         self.conf = conf
+        # Clasificación PEGAJOSA respecto a la línea de esquina (ver
+        # ObstacleMemory.classify_and_split()): None = aún sin clasificar,
+        # True = más allá (siguiente recta), False = mía (recta actual).
+        # Una vez fijada, NO se reevalúa -- evita que ruido momentáneo en la
+        # posición rastreada, justo cuando la línea se estabiliza, voltee la
+        # clasificación de un objeto que ya se está esquivando a medias.
+        self.beyond: bool | None = None
 
 
 class ObstacleMemory:
@@ -248,3 +255,46 @@ class ObstacleMemory:
         self.last_confidences = [o.conf for o in self._obs]
 
         return [(o.x, o.y, o.color) for o in self._obs]
+
+    def classify_and_split(
+        self, classify_fn
+    ) -> tuple[list[tuple[float, float, str]], list[tuple[float, float, str]], list[float]]:
+        """
+        Separa los obstáculos en memoria entre "mi recta" y "más allá" de la
+        línea de esquina, usando clasificación PEGAJOSA por objeto (ver
+        _Obs.beyond): una vez que un objeto se clasifica, ya NO se
+        reevalúa — evita que ruido momentáneo en su posición rastreada,
+        justo cuando la línea se estabiliza, lo pase de un lado a otro y
+        abandone/retome una esquiva a medias (confirmado en pista: pasaba
+        exactamente esto).
+
+        classify_fn(ox, oy) -> True (mía) | False (más allá) | None (todavía
+        no se puede saber, p.ej. línea sin estabilizar) — mismo contrato que
+        OrangeLineTracker.classify() pero solo con ox, oy (robot_x/robot_y
+        ya deben venir "horneados" en un lambda/partial del caller).
+
+        Llamar SOLO cuando la línea es visible y estable (mismo criterio que
+        ya se usaba en runtime_nuevo.py) — si no, no llamar y tratar todo
+        como "mío", igual que siempre.
+
+        Retorna (mine, beyond, mine_conf) — mine/beyond son listas de
+        (x, y, color); mine_conf alineado 1:1 con mine.
+        """
+        mine: list[tuple[float, float, str]] = []
+        beyond: list[tuple[float, float, str]] = []
+        mine_conf: list[float] = []
+        for o in self._obs:
+            if o.beyond is None:
+                result = classify_fn(o.x, o.y)
+                if result is True:
+                    o.beyond = False
+                elif result is False:
+                    o.beyond = True
+                # result is None -> se queda sin clasificar, se reintenta
+                # el siguiente frame (no es "sticky" hasta que SÍ se resuelve).
+            if o.beyond is True:
+                beyond.append((o.x, o.y, o.color))
+            else:
+                mine.append((o.x, o.y, o.color))
+                mine_conf.append(o.conf)
+        return mine, beyond, mine_conf
