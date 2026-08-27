@@ -424,15 +424,23 @@ def detect_centerline(
         wall_side = -1 if left_free >= right_free else 1
 
     # ── 3. Muestreo fila a fila ────────────────────────────────────────────
-    points: list[tuple[float, int]] = []
-    weights: list[float] = []
+    # Ancla fija: el path SIEMPRE arranca en la posición real del robot. Sin
+    # este punto, el primero era el centro del hueco de piso más ancho de la
+    # fila del chasis -- que el untado de color de un obstáculo cercano (o una
+    # pared asimétrica en la esquina) empuja a un costado, haciendo que el path
+    # naciera torcido y luego pegara un pico al volver al centro. Además se
+    # arranca el muestreo EN la fila del robot (no h-10): las 1-2 filas detrás
+    # del eje del robot son las más ruidosas (borde del BEV, sombra del chasis).
+    points: list[tuple[float, int]] = [(float(C.ROBOT_BEV_X), C.ROBOT_BEV_Y)]
+    weights: list[float] = [0.0]
     # Historial de bordes (y, izq, der) del hueco safe_mask en filas con dato
     # real -- permite, cuando una fila más adelante se queda sin piso, AJUSTAR
     # la tendencia del borde que se está cerrando y proyectarla hacia
     # adelante, en vez de reaccionar solo a lo que ya es visible (ver rama
     # "sin piso" más abajo).
     edge_hist: list[tuple[int, int, int]] = []
-    for y in range(h - 10, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
+    y_start = min(h - 10, C.ROBOT_BEV_Y - C.CENTERLINE_ROW_STEP)
+    for y in range(y_start, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
         row = free_mask[y, :]
 
         safe_bounds = _widest_free_segment_bounds(safe_mask[y, :], C.CENTERLINE_MIN_WIDTH)
@@ -582,10 +590,21 @@ def detect_centerline(
                     probe += step
                 cx = float(probe) if 0 <= probe < w and free_mask[y, probe] != 0 else float(pass_cx)
 
+        # Anclaje gradual de la base: en las primeras filas (cerca del chasis)
+        # se mezcla cx hacia el eje del robot -- factor 0 en el robot, 1 al
+        # llegar a CENTERLINE_BASE_ANCHOR_PX. Mantiene el arranque del path
+        # pegado al robot y lo despega suave, matando el pico de la base. NO
+        # aplica si la esquiva ya pesa fuerte a esta altura (best_w alto =
+        # obstáculo pegado que sí exige salir de inmediato).
+        d_robot = C.ROBOT_BEV_Y - y
+        if 0 < d_robot < C.CENTERLINE_BASE_ANCHOR_PX and best_w < C.CENTERLINE_BASE_ANCHOR_MAX_W:
+            a = d_robot / float(C.CENTERLINE_BASE_ANCHOR_PX)
+            cx = a * cx + (1.0 - a) * float(C.ROBOT_BEV_X)
+
         points.append((float(np.clip(cx, 0, w - 1)), y))
         weights.append(best_w)
 
-    if points:
+    if len(points) > 1:   # > 1: siempre está el ancla del robot; hace falta ≥1 fila real
         points = _limit_lateral_step(points, weights)
         points = _smooth_x(points, weights)
         # Red de seguridad FINAL: cada fila ya se verificó individualmente
@@ -597,6 +616,12 @@ def detect_centerline(
         # real (confirmado con pruebas: sin esto había puntos invadiendo la
         # zona de seguridad incluso con confianza plena).
         points = _enforce_free_mask(points, free_mask, w)
+        # El ancla es un hecho (posición del robot), no una medición: ni el
+        # suavizado ni el cap de paso deben correrla.
+        points[0] = (float(C.ROBOT_BEV_X), C.ROBOT_BEV_Y)
+    else:
+        # Solo quedó el ancla: ninguna fila con piso -> sin path (igual que antes).
+        return []
 
     return [(int(round(np.clip(x, 0, w - 1))), int(y)) for x, y in points]
 

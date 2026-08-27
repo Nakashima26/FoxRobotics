@@ -104,6 +104,18 @@ CENTERLINE_RAMP_PX   = 140   # horizonte de anticipo: empieza a abrir el path
                              # hacia el lado de paso a esta distancia Y de la lata
                              # (200 px ≈ 400 mm; debe ser > LOOKAHEAD_PX)
 CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-muestreo
+CENTERLINE_BASE_ANCHOR_PX = 55  # el path arranca SIEMPRE en el eje del robot
+                             # (ROBOT_BEV_X) y solo se despega gradualmente en los
+                             # primeros N px de Y. Sin esto, la primera fila nacía
+                             # en "el centro del hueco de piso más ancho", que el
+                             # color de un obstáculo cercano untado por la homografía
+                             # (o una pared asimétrica en la esquina) empujaba a un
+                             # costado -> el path nacía torcido y pegaba un pico feo
+                             # al volver al centro. Se ignora si la esquiva ya es
+                             # fuerte a esa altura (obstáculo pegado que exige salir
+                             # de inmediato -- ver best_w en detect_centerline()).
+CENTERLINE_BASE_ANCHOR_MAX_W = 0.5   # si best_w supera esto en una fila anclada, NO
+                             # se ancla (la urgencia real de esquiva manda).
 
 # ─── Manejo de obstáculos en BEV ─────────────────────────────────────────────
 # Tamaño físico real de los obstáculos (latas de refresco WRO ≈ 65 mm diámetro)
