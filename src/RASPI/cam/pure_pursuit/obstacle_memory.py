@@ -194,6 +194,19 @@ class ObstacleMemory:
         behind_y = self.ry + C.OBS_MEM_BEHIND_PAD
         return f"y={o.y:.0f} conf={o.conf:.2f} falta={behind_y - o.y:+.0f}px"
 
+    def debug_all(self) -> str:
+        """
+        Un renglón por CADA obstáculo en memoria (x,y,color,conf) -- a
+        diferencia de debug_closest(), esto expone de inmediato si hay más
+        de un registro del mismo color separados en el espacio (fantasma)
+        en vez de tener que inferirlo mirando el BEV a ojo.
+        """
+        if not self._obs:
+            return "-"
+        return " | ".join(
+            f"{o.color[0]}(x={o.x:.0f},y={o.y:.0f},c={o.conf:.2f})" for o in self._obs
+        )
+
     # ── API ─────────────────────────────────────────────────────────────────────
 
     def update(self,
