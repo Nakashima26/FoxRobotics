@@ -455,13 +455,15 @@ class PPRuntime:
                         bev_timing["dc"] = (_t5 - _t4) * 1000.0
 
                         if len(path_points) >= C.MIN_PATH_PTS:
-                            # Lookahead FIJO (como main). adaptive_lookahead lo
-                            # bajaba a ~45-52 px con una lata cerca -> la fórmula
-                            # geométrica duplicaba el steer para el mismo path.
-                            # bev_obstacles se sigue pasando para conservar
-                            # _distance_steer_gain (ATENÚA cuando la lata aún
-                            # está lejos) y la selección de target del anillo.
-                            lookahead_eff = C.LOOKAHEAD_PX
+                            # Lookahead ADAPTATIVO: se acorta (~45 px) cuando hay
+                            # una lata cerca -> la geometría pure-pursuit exige un
+                            # steer más cerrado para el mismo path -> esquiva de
+                            # inmediato en vez de entrar largo y comerse el cono.
+                            # Sin obstáculos cerca vuelve a LOOKAHEAD_MAX_PX
+                            # (trayectoria suave en recta/curva normal).
+                            lookahead_eff = self.controller.adaptive_lookahead(
+                                bev_obstacles, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
+                            )
                             steer_deg, lookahead_pt = self.controller.compute(
                                 path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y,
                                 lookahead_px=lookahead_eff,
