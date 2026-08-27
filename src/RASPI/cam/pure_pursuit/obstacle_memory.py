@@ -55,12 +55,16 @@ class ObstacleMemory:
         self._prev_heading: float | None = None
         self.last_passed: bool = False   # ver _prune() / update()
         self.last_prune_reason: str = "-"   # último motivo de poda, para overlay en pantalla
+        self.last_confidences: list[float] = []   # alineado 1:1 con la lista que
+                                                    # devolvió el último update() —
+                                                    # ver detect_centerline(obstacle_conf=)
 
     def reset(self):
         self._obs.clear()
         self._prev_heading = None
         self.last_passed = False
         self.last_prune_reason = "-"
+        self.last_confidences = []
 
     # ── Transformación por movimiento del robot ─────────────────────────────────
 
@@ -235,5 +239,12 @@ class ObstacleMemory:
         self._merge(new_obs)
         self._dedupe()
         self.last_passed = self._prune()
+
+        # Alineado 1:1, mismo orden, con la lista que se retorna abajo --
+        # quien la consuma (detect_centerline vía obstacle_conf=) puede
+        # atenuar la urgencia de esquiva de un obstáculo que lleva varios
+        # frames sin verse de verdad (solo arrastrado por posición asumida)
+        # en vez de tratarlo con la misma autoridad que uno recién visto.
+        self.last_confidences = [o.conf for o in self._obs]
 
         return [(o.x, o.y, o.color) for o in self._obs]

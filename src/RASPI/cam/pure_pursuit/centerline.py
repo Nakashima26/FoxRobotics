@@ -209,6 +209,38 @@ def _limit_lateral_step(points: list[tuple[float, int]], weights: list[float] | 
     return out
 
 
+def _enforce_free_mask(points: list[tuple[float, int]], free_mask: np.ndarray, w: int) -> list[tuple[float, int]]:
+    """
+    Red de seguridad final: garantiza que NINGÚN punto del path termine
+    sobre un pixel bloqueado (obstáculo o pared), sin importar qué le haya
+    pasado en el post-procesado (_smooth_x/_limit_lateral_step). Se corre
+    DESPUÉS de todo eso porque el suavizado promedia con filas vecinas sin
+    ninguna noción de qué está bloqueado, y puede jalar un punto que ya se
+    había verificado seguro fila por fila de vuelta hacia una zona bloqueada
+    (confirmado con pruebas: pasaba incluso sin ninguna atenuación por
+    confianza de por medio).
+
+    Si un punto cae en zona bloqueada, se mueve al pixel libre más cercano
+    de ESA fila (en cualquier dirección) — ya no hay contexto de "hacia
+    qué lado" a esta altura del pipeline, así que simplemente el más
+    cercano. Si la fila no tiene NADA libre, se deja tal cual (no hay a
+    dónde moverlo).
+    """
+    fixed: list[tuple[float, int]] = []
+    for x, y in points:
+        xi = int(np.clip(round(x), 0, w - 1))
+        if free_mask[y, xi] != 0:
+            fixed.append((x, y))
+            continue
+        free_cols = np.where(free_mask[y, :] > 0)[0]
+        if free_cols.size == 0:
+            fixed.append((x, y))
+            continue
+        nearest = free_cols[np.argmin(np.abs(free_cols.astype(np.int64) - xi))]
+        fixed.append((float(nearest), y))
+    return fixed
+
+
 def _extract_thin_blue_line(hsv: np.ndarray, shape: tuple) -> np.ndarray:
     """
     Separa la cinta azul delgada de la pared azul/gris gruesa dentro del
@@ -262,6 +294,7 @@ def detect_centerline(
     bev_bgr: np.ndarray,
     bev_obstacles: list[tuple[float, float, str]],
     bev_hsv: np.ndarray | None = None,
+    obstacle_conf: list[float] | None = None,
 ) -> list[tuple[int, int]]:
     """
     Detecta la línea central del corredor en la imagen BEV.
@@ -279,6 +312,17 @@ def detect_centerline(
                      OrangeLineTracker.update() para no convertir la misma
                      imagen BGR->HSV dos veces por frame). Si no se pasa, se
                      calcula aquí como antes.
+      obstacle_conf: confianza (0..1) de cada obstáculo, MISMO orden/largo que
+                     bev_obstacles (ver ObstacleMemory.last_confidences) --
+                     atenúa qué tan fuerte se compromete el path al lado de
+                     paso WRO cuando el obstáculo lleva varios frames sin
+                     verse de verdad (solo arrastrado por posición asumida,
+                     cada vez menos confiable). Si no se pasa, se asume
+                     confianza 1.0 para todos (comportamiento de siempre).
+                     IMPORTANTE: esto NO reduce el círculo de seguridad
+                     físico (OBS_INFLATE_R, más abajo) -- ese se mantiene
+                     completo siempre, sin importar la confianza; solo
+                     atenúa cuánto se abre el path hacia el lado preferido.
 
     Retorna lista de (x, y) en coordenadas BEV, ordenada de abajo (robot)
     hacia arriba (adelante).  Lista vacía si no hay suficiente piso visible.
@@ -391,10 +435,17 @@ def detect_centerline(
         pass_cx: int | None = None
         best_ox: float | None = None
         best_color: str | None = None
-        for ox, oy, color in bev_obstacles:
+        for idx, (ox, oy, color) in enumerate(bev_obstacles):
             if color not in ("Red", "Green"):
                 continue
-            wgt = _ramp_weight(y, oy)
+            conf = 1.0
+            if obstacle_conf is not None and idx < len(obstacle_conf):
+                conf = obstacle_conf[idx]
+            # Atenúa la urgencia (no la zona de seguridad, ver OBS_INFLATE_R
+            # arriba) si este obstáculo lleva varios frames sin verse de
+            # verdad -- menos autoridad para comprometer un giro fuerte
+            # basado en una posición cada vez más especulativa.
+            wgt = _ramp_weight(y, oy) * conf
             if wgt > best_w:
                 cx_side = _pass_side_cx(row, safe_mask[y, :], ox, color)
                 if cx_side is not None:
@@ -486,28 +537,39 @@ def detect_centerline(
             cx = float(free_cx)
         else:
             cx = (1.0 - best_w) * float(free_cx) + best_w * float(pass_cx)
-            # El blend lineal en espacio de píxeles puede caer DENTRO de la
-            # zona bloqueada del obstáculo si free_cx y pass_cx quedan en
-            # lados opuestos de la lata (promedio de dos puntos seguros que
-            # cruza justo por en medio del hueco tapado). Si el punto
-            # resultante no es transitable, comprometerse de una vez al lado
-            # de paso correcto en vez de rozar/cortar por la lata.
-            cx_check = int(np.clip(round(cx), 0, w - 1))
-            if free_mask[y, cx_check] == 0:
-                cx = float(pass_cx)
 
             # El blend también puede quedar del lado INCORRECTO del obstáculo
             # (transitable, pero violando la regla de color WRO) si free_cx
             # -el hueco más ancho de la fila, sin noción de lado- cae del
-            # lado contrario a pass_cx y pesa más en el promedio. Una vez que
-            # el obstáculo ya pesa algo en esta fila (best_w>0), no hay
-            # "medio lado incorrecto" válido — o se ignora del todo (best_w=0,
-            # ya cubierto arriba) o se mueve hacia el lado correcto, nunca
-            # hacia el equivocado.
+            # lado contrario a pass_cx y pesa más en el promedio. La
+            # corrección es PROPORCIONAL a best_w (no un clamp duro a
+            # best_ox): con best_w alto (obstáculo cerca y/o confianza alta)
+            # corrige fuerte, hasta comprometerse por completo al lado
+            # correcto; con best_w bajo (aún lejos y/o confianza baja tras
+            # varios frames sin verse de verdad), corrige poco y deja que el
+            # corredor natural (free_cx, ya de por sí seguro) mande — un
+            # clamp duro aquí anulaba por completo la atenuación de arriba,
+            # porque SIEMPRE forzaba hasta best_ox sin importar qué tan chico
+            # fuera best_w.
             if best_color == "Red" and cx < best_ox:
-                cx = float(pass_cx)
+                cx = cx + (best_ox - cx) * best_w
             elif best_color == "Green" and cx > best_ox:
-                cx = float(pass_cx)
+                cx = cx - (cx - best_ox) * best_w
+
+            # El blend (ya corregido de lado) puede caer DENTRO de la zona
+            # bloqueada del obstáculo -- inevitable justo después del fix de
+            # arriba, ya que best_ox es el CENTRO del obstáculo, siempre
+            # bloqueado. Empujar el MÍNIMO necesario hacia pass_cx hasta salir
+            # de la zona bloqueada (no saltar directo a pass_cx completo, por
+            # la misma razón que arriba: preservar la atenuación por
+            # confianza/distancia en vez de forzar máxima esquiva siempre).
+            cx_check = int(np.clip(round(cx), 0, w - 1))
+            if free_mask[y, cx_check] == 0:
+                step = 1 if pass_cx >= cx else -1
+                probe = cx_check
+                while 0 <= probe < w and free_mask[y, probe] == 0:
+                    probe += step
+                cx = float(probe) if 0 <= probe < w and free_mask[y, probe] != 0 else float(pass_cx)
 
         points.append((float(np.clip(cx, 0, w - 1)), y))
         weights.append(best_w)
@@ -515,6 +577,15 @@ def detect_centerline(
     if points:
         points = _limit_lateral_step(points, weights)
         points = _smooth_x(points, weights)
+        # Red de seguridad FINAL: cada fila ya se verificó individualmente
+        # contra el círculo bloqueado del obstáculo antes de esto, pero
+        # _smooth_x() promedia con las filas vecinas sin saber nada de
+        # OBS_INFLATE_R -- puede jalar un punto ya seguro de vuelta hacia
+        # adentro de la zona bloqueada. Verificar y corregir el resultado
+        # FINAL, después de todo el post-procesado, es la única garantía
+        # real (confirmado con pruebas: sin esto había puntos invadiendo la
+        # zona de seguridad incluso con confianza plena).
+        points = _enforce_free_mask(points, free_mask, w)
 
     return [(int(round(np.clip(x, 0, w - 1))), int(y)) for x, y in points]
 

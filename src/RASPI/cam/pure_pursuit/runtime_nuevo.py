@@ -324,6 +324,7 @@ class PPRuntime:
                 path_points   = []
                 bev_frame     = None
                 bev_obstacles = []
+                obstacle_conf: list[float] = []   # alineado 1:1 con bev_obstacles
                 pp_active     = False
                 pasado        = False
                 line_info     = {"Orange": {"seen": False, "near_y": None}}
@@ -364,10 +365,14 @@ class PPRuntime:
                         # (Solo con obstáculos BEV reales — el far_hint NO entra aquí)
                         if self._is_turning:
                             bev_obstacles = []
+                            obstacle_conf = []
                         else:
                             bev_obstacles = self.memory.update(
                                 new_obstacles, dt_s, self._last_heading
                             )
+                            # Alineado 1:1 con bev_obstacles (mismo orden) --
+                            # ver detect_centerline(obstacle_conf=).
+                            obstacle_conf = list(self.memory.last_confidences)
                             # Evento de un solo frame: un obstáculo quedó detrás
                             # del robot recién en este update -> "ya lo pasé de
                             # verdad", no "dejé de verlo". Dispara RECUPERANDO.
@@ -401,14 +406,20 @@ class PPRuntime:
                         orange_info = line_info["Orange"]
                         if orange_info["seen"] and not en_recuperacion_giro:
                             bev_obstacles_mine = []
-                            for o in bev_obstacles:
+                            conf_mine = []
+                            # zip con obstacle_conf para que el filtrado no
+                            # desalinee las confianzas respecto a bev_obstacles
+                            # (mismo índice = mismo obstáculo).
+                            for o, c in zip(bev_obstacles, obstacle_conf):
                                 if self.line_tracker.classify(
                                     o[0], o[1], C.ROBOT_BEV_X, C.ROBOT_BEV_Y
                                 ) is False:
                                     bev_obstacles_beyond.append(o)
                                 else:
                                     bev_obstacles_mine.append(o)
+                                    conf_mine.append(c)
                             bev_obstacles = bev_obstacles_mine
+                            obstacle_conf = conf_mine
 
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
                         # persistencia, ver TurnDirectionTracker) de la posición
@@ -434,7 +445,9 @@ class PPRuntime:
 
                         # Detectar centerline (con obstáculos recordados+nuevos,
                         # ya sin los que quedaron más allá de la naranja)
-                        path_points = detect_centerline(bev_frame, bev_obstacles, bev_hsv=bev_hsv)
+                        path_points = detect_centerline(
+                            bev_frame, bev_obstacles, bev_hsv=bev_hsv, obstacle_conf=obstacle_conf
+                        )
                         _t5 = time.perf_counter()
                         bev_timing["dc"] = (_t5 - _t4) * 1000.0
 
