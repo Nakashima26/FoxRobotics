@@ -581,6 +581,16 @@ def detect_centerline(
                     probe += step
                 cx = float(probe) if 0 <= probe < w and free_mask[y, probe] != 0 else float(pass_cx)
 
+        # Zona recta de arranque (ver CENTERLINE_BASE_STRAIGHT_PX): cerca del
+        # chasis el path se mantiene sobre el eje del robot y se despega
+        # gradual -- así "sale del centro y ahí recién gira lo necesario", en
+        # vez de irse de lado desde la primera fila por el horizonte de
+        # anticipo. No aplica si la esquiva ya es urgente aquí (best_w alto).
+        d_robot = C.ROBOT_BEV_Y - y
+        if 0 < d_robot < C.CENTERLINE_BASE_STRAIGHT_PX and best_w < C.CENTERLINE_BASE_STRAIGHT_MAX_W:
+            a = d_robot / float(C.CENTERLINE_BASE_STRAIGHT_PX)
+            cx = a * cx + (1.0 - a) * float(C.ROBOT_BEV_X)
+
         points.append((float(np.clip(cx, 0, w - 1)), y))
         weights.append(best_w)
 

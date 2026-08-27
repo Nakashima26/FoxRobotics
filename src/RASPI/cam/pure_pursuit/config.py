@@ -100,10 +100,30 @@ FLOOR_COLOR_RANGES = [
 CENTERLINE_ROW_STEP  = 15    # muestrear cada N filas
 CENTERLINE_MIN_WIDTH = 20    # píxeles mínimos de espacio libre para aceptar fila
 CENTERLINE_TOP_Y     = BEV_H // 3   # no subir más allá de 1/3 de la imagen
-CENTERLINE_RAMP_PX   = 140   # horizonte de anticipo: empieza a abrir el path
-                             # hacia el lado de paso a esta distancia Y de la lata
-                             # (200 px ≈ 400 mm; debe ser > LOOKAHEAD_PX)
+CENTERLINE_RAMP_PX   = 100   # horizonte de anticipo: empieza a abrir el path
+                             # hacia el lado de paso a esta distancia Y de la lata.
+                             # DEBE ser >= LOOKAHEAD_PX (100) para que el path ya
+                             # esté comprometido cuando PP alcanza el punto target.
+                             # Estaba en 140: con un obstáculo a ~130-150 px eso
+                             # abría el path DESDE el robot (sin tramo recto) y el
+                             # steer salía muy fuerte y muy temprano -- el "pico".
+                             # A 100 quedan ~2-3 filas rectas antes de abrir.
+                             # Subir si el carro reacciona tarde; bajar (ojo con
+                             # el límite de LOOKAHEAD_PX) si aún abre muy pronto.
 CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-muestreo
+
+# Zona recta de arranque: en las filas dentro de esta distancia Y del robot, el
+# centerline se mantiene pegado al eje (ROBOT_BEV_X) y solo se despega en forma
+# gradual (factor 0 en el robot -> 1 al borde de la zona). Sin esto, con un
+# obstáculo a ~130-150 px, el "horizonte de anticipo" (CENTERLINE_RAMP_PX=140)
+# abre el path hacia el lado de paso DESDE el robot mismo -- no hay tramo recto,
+# y el path nace en el centro pero se va de lado de inmediato (el "pico"). Esto
+# NO reduce la anticipación (RAMP_PX se mantiene): solo obliga a que el path
+# salga derecho del carro y ahí recién gire lo necesario.
+CENTERLINE_BASE_STRAIGHT_PX    = 55
+# ...salvo que la esquiva ya sea urgente a esa altura (obstáculo casi encima):
+# si best_w supera esto en una fila de la zona, NO se ancla (manda la urgencia).
+CENTERLINE_BASE_STRAIGHT_MAX_W = 0.6
 
 # ─── Manejo de obstáculos en BEV ─────────────────────────────────────────────
 # Tamaño físico real de los obstáculos (latas de refresco WRO ≈ 65 mm diámetro)
