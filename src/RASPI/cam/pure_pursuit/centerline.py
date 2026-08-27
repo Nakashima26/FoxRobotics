@@ -413,23 +413,15 @@ def detect_centerline(
         wall_side = -1 if left_free >= right_free else 1
 
     # ── 3. Muestreo fila a fila ────────────────────────────────────────────
-    # El path SIEMPRE arranca en la posición real del robot. Antes el primer
-    # punto era el "hueco de piso más ancho" de la fila h-10, que está 10 px
-    # DETRÁS del eje del robot -- zona fuera del trapecio válido de la
-    # homografía (la calibración empieza ~80 mm ADELANTE), donde píxeles sueltos
-    # de color-piso hacían nacer el path a un costado del carro y luego pegar un
-    # salto al entrar al área con dato real. Se ancla el arranque al robot y el
-    # muestreo empieza EN su fila, no detrás.
-    points: list[tuple[float, int]] = [(float(C.ROBOT_BEV_X), C.ROBOT_BEV_Y)]
-    weights: list[float] = [0.0]
+    points: list[tuple[float, int]] = []
+    weights: list[float] = []
     # Historial de bordes (y, izq, der) del hueco safe_mask en filas con dato
     # real -- permite, cuando una fila más adelante se queda sin piso, AJUSTAR
     # la tendencia del borde que se está cerrando y proyectarla hacia
     # adelante, en vez de reaccionar solo a lo que ya es visible (ver rama
     # "sin piso" más abajo).
     edge_hist: list[tuple[int, int, int]] = []
-    y_start = min(h - 10, C.ROBOT_BEV_Y - C.CENTERLINE_ROW_STEP)
-    for y in range(y_start, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
+    for y in range(h - 10, C.CENTERLINE_TOP_Y, -C.CENTERLINE_ROW_STEP):
         row = free_mask[y, :]
 
         safe_bounds = _widest_free_segment_bounds(safe_mask[y, :], C.CENTERLINE_MIN_WIDTH)
@@ -530,9 +522,7 @@ def detect_centerline(
             # Sin historial suficiente para ajustar una tendencia (p.ej. la
             # primera fila ya sale sin piso): comprometerse al lado que ya se
             # sabía abierto, con máxima urgencia, como red de seguridad.
-            # len>1: tiene que haber al menos un punto MUESTREADO de verdad
-            # (no solo el ancla del robot) para saber qué lado estaba abierto.
-            if len(points) > 1:
+            if points:
                 last_x, _last_y = points[-1]
                 side = -1 if last_x < C.ROBOT_BEV_X else 1
                 cx_extrap = 0.0 if side < 0 else float(w - 1)
@@ -584,11 +574,6 @@ def detect_centerline(
         points.append((float(np.clip(cx, 0, w - 1)), y))
         weights.append(best_w)
 
-    if len(points) <= 1:
-        # Solo quedó el ancla del robot: ninguna fila con piso -> sin path
-        # (mismo contrato que antes: lista vacía).
-        return []
-
     if points:
         points = _limit_lateral_step(points, weights)
         points = _smooth_x(points, weights)
@@ -601,9 +586,6 @@ def detect_centerline(
         # real (confirmado con pruebas: sin esto había puntos invadiendo la
         # zona de seguridad incluso con confianza plena).
         points = _enforce_free_mask(points, free_mask, w)
-        # El ancla es la posición del robot (un hecho, no una medición): ni el
-        # suavizado ni la red de seguridad la corren de ahí.
-        points[0] = (float(C.ROBOT_BEV_X), float(C.ROBOT_BEV_Y))
 
     return [(int(round(np.clip(x, 0, w - 1))), int(y)) for x, y in points]
 
