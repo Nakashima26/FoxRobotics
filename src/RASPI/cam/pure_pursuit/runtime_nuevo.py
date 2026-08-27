@@ -368,7 +368,8 @@ class PPRuntime:
                             obstacle_conf = []
                         else:
                             bev_obstacles = self.memory.update(
-                                new_obstacles, dt_s, self._last_heading
+                                new_obstacles, dt_s, self._last_heading,
+                                estado=self._prev_estado,
                             )
                             # Alineado 1:1 con bev_obstacles (mismo orden) --
                             # ver detect_centerline(obstacle_conf=).

@@ -128,8 +128,18 @@ WHEELBASE_PX   = 50.0    # batalla del vehículo en px BEV   (= 100 mm)
 MAX_STEER_DEG  = 60.0    # límite mecánico del servo en grados
 MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 
+# ── Límite de slew: cuánto puede cambiar el steer entre frames procesados ──
+# En pista el steer saltaba +0.56 -> +0.20 -> +0.79 -> -0.28 (norm.) frame a
+# frame = latigazo. Esto lo capa. 0 desactiva. 12°/frame @ ~15fps ≈ 180°/s,
+# suficiente para esquivar sin dar el volantazo. En grados de steer (pre-norm).
+PP_STEER_SLEW_DEG = 12.0
+
 # Lookahead variable — derivado de la escala de urgencia
-LOOKAHEAD_MIN_PX      = 45.0
+# NOTA: 45 px saturaba el steer al tope mecánico (obs=±1.0) en cada esquiva
+# con lata cerca -> el carro clavaba el volante, sobrepasaba y raspaba la lata
+# al pasar (confirmado en pista, choque en rojo de inicio y en cada verde).
+# 70 px conserva el "acortar para esquivar" sin pegar el límite.
+LOOKAHEAD_MIN_PX      = 70.0
 LOOKAHEAD_MAX_PX      = 100.0
 LOOKAHEAD_OBS_NEAR_PX = OBSTACLE_URGENT_MM / MM_PER_PX   # ≈110px
 LOOKAHEAD_OBS_FAR_PX  = OBSTACLE_CASUAL_MM / MM_PER_PX   # ≈250px
@@ -181,7 +191,21 @@ OBS_MEM_MATCH_PX   = 75.0    # radio para fusionar una detección nueva con una 
 OBS_MEM_DECAY      = 0.12    # confianza perdida por frame sin re-ver el obstáculo (0..1)
 OBS_MEM_MIN_CONF   = 0.4    # por debajo de esto el obstáculo recordado se descarta
 OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
-OBS_MEM_BEHIND_PAD = 1      # px: tirar el obstáculo cuando queda detrás del robot (bev_y > robot_y + pad)
+OBS_MEM_BEHIND_PAD = 40     # px: tirar el obstáculo (y disparar "pasado") solo cuando
+                              # queda BIEN detrás del robot (bev_y > robot_y + pad). En 1
+                              # disparaba "pasado" apenas el centro de la lata cruzaba 1px
+                              # el origen del robot -- pero el chasis tiene largo, la lata
+                              # aún estaba debajo/al lado. El clear prematuro de memoria
+                              # a media esquiva es lo que hacía que el carro se
+                              # enderezara encima de la lata. 40px ≈ 80mm de margen.
+
+# ── Arranque: rampa de velocidad asumida para el arrastre de la memoria ──
+# _advance() acredita ROBOT_SPEED_MMS completos desde el frame 1, pero el carro
+# sale de 0 y los primeros ~1s va más lento (y girando en el sitio). Eso marcha
+# la lata recordada fuera de memoria antes de que el carro físicamente la
+# rebase -> "pasado" falso en el rojo de inicio. Rampa lineal 0->1 sobre este
+# tiempo (acumulado, NO se reinicia en cada giro).
+OBS_MEM_LAUNCH_RAMP_S = 1.2
 OBS_MEM_MAX        = 12      # tope de obstáculos recordados (seguridad)
 OBS_MEM_DEDUPE_PX  = 55.0    # red de seguridad secundaria si igual se duplica -- ver OBS_MEM_MATCH_PX
                               # (mismo riesgo de confundir obstáculos de esquina: se

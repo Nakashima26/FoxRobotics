@@ -15,6 +15,10 @@ class PurePursuitController:
     (Y decreciente = dirección de marcha).
     """
 
+    def __init__(self):
+        # Último steer_deg entregado por compute(), para el límite de slew.
+        self._prev_steer_deg: float = 0.0
+
     @staticmethod
     def adaptive_lookahead(
         bev_obstacles: list[tuple[float, float, str]],
@@ -134,6 +138,16 @@ class PurePursuitController:
             steer_deg *= gain
 
         steer_deg = max(-C.MAX_STEER_DEG, min(C.MAX_STEER_DEG, steer_deg))
+
+        # ── Límite de slew: capa el cambio de steer entre frames procesados ──
+        # Evita el latigazo (+0.56 -> +0.20 -> +0.79 -> -0.28 norm. visto en
+        # pista). PP_STEER_SLEW_DEG <= 0 lo desactiva.
+        slew = getattr(C, "PP_STEER_SLEW_DEG", 0.0)
+        if slew > 0.0:
+            lo = self._prev_steer_deg - slew
+            hi = self._prev_steer_deg + slew
+            steer_deg = max(lo, min(hi, steer_deg))
+        self._prev_steer_deg = steer_deg
 
         return steer_deg, (float(target[0]), float(target[1]))
 
