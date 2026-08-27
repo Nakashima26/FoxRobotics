@@ -28,20 +28,24 @@ from . import config as C
 
 
 class _Obs:
-    __slots__ = ("x", "y", "color", "conf", "beyond")
+    __slots__ = ("x", "y", "color", "conf", "beyond", "_cls_vote", "_cls_votes")
 
     def __init__(self, x: float, y: float, color: str, conf: float):
         self.x = x
         self.y = y
         self.color = color
         self.conf = conf
-        # Clasificación PEGAJOSA respecto a la línea de esquina (ver
-        # ObstacleMemory.classify_and_split()): None = aún sin clasificar,
+        # Clasificación respecto a la línea de esquina (ver
+        # ObstacleMemory.classify_and_split()): None = aún sin veredicto,
         # True = más allá (siguiente recta), False = mía (recta actual).
-        # Una vez fijada, NO se reevalúa -- evita que ruido momentáneo en la
-        # posición rastreada, justo cuando la línea se estabiliza, voltee la
-        # clasificación de un objeto que ya se está esquivando a medias.
+        # NO es permanente: se re-evalúa cada frame, pero cambiar el veredicto
+        # exige histéresis (LINE_CLASSIFY_FRAMES_TO_MINE/TO_BEYOND) -- así ni un
+        # brinco de posición ni una mala lectura de línea de un frame lo voltean,
+        # pero una mala clasificación fijada SÍ se puede corregir cuando la línea
+        # vuelve a leer bien varios frames seguidos.
         self.beyond: bool | None = None
+        self._cls_vote: bool | None = None    # cambio pendiente (True = a "más allá")
+        self._cls_votes: int = 0              # frames seguidos apoyando ese cambio
 
 
 class ObstacleMemory:
@@ -261,12 +265,14 @@ class ObstacleMemory:
     ) -> tuple[list[tuple[float, float, str]], list[tuple[float, float, str]], list[float]]:
         """
         Separa los obstáculos en memoria entre "mi recta" y "más allá" de la
-        línea de esquina, usando clasificación PEGAJOSA por objeto (ver
-        _Obs.beyond): una vez que un objeto se clasifica, ya NO se
-        reevalúa — evita que ruido momentáneo en su posición rastreada,
-        justo cuando la línea se estabiliza, lo pase de un lado a otro y
-        abandone/retome una esquiva a medias (confirmado en pista: pasaba
-        exactamente esto).
+        línea de esquina, con HISTÉRESIS por objeto (ver _Obs.beyond): se
+        re-evalúa cada frame, pero para cambiar el veredicto de un objeto la
+        nueva clasificación debe repetirse varios frames seguidos --
+        LINE_CLASSIFY_FRAMES_TO_MINE (pocos, lado seguro / recupera de una
+        mala fijación) o LINE_CLASSIFY_FRAMES_TO_BEYOND (más, no abandona una
+        esquiva a medias por un tramo malo de lectura de línea). Así ni un
+        brinco de posición ni una mala lectura puntual lo voltean, pero un
+        "más allá" mal fijado SÍ se corrige cuando la línea vuelve a leer bien.
 
         classify_fn(ox, oy) -> True (mía) | False (más allá) | None (todavía
         no se puede saber, p.ej. línea sin estabilizar) — mismo contrato que
@@ -284,17 +290,31 @@ class ObstacleMemory:
         beyond: list[tuple[float, float, str]] = []
         mine_conf: list[float] = []
         for o in self._obs:
-            if o.beyond is None:
-                result = classify_fn(o.x, o.y)
-                if result is True:
-                    o.beyond = False
-                elif result is False:
-                    o.beyond = True
-                # result is None -> se queda sin clasificar, se reintenta
-                # el siguiente frame (no es "sticky" hasta que SÍ se resuelve).
+            result = classify_fn(o.x, o.y)   # True=mía, False=más allá, None=sin dato
+            if result is not None:
+                want_beyond = (result is False)
+                if want_beyond == (o.beyond is True):
+                    # La línea confirma el veredicto vigente -> no hay cambio
+                    # pendiente, se limpia cualquier conteo a medias.
+                    o._cls_vote = None
+                    o._cls_votes = 0
+                else:
+                    # La línea discrepa del veredicto vigente (o aún no hay).
+                    if want_beyond == o._cls_vote:
+                        o._cls_votes += 1
+                    else:
+                        o._cls_vote = want_beyond
+                        o._cls_votes = 1
+                    need = (C.LINE_CLASSIFY_FRAMES_TO_BEYOND if want_beyond
+                            else C.LINE_CLASSIFY_FRAMES_TO_MINE)
+                    if o._cls_votes >= need:
+                        o.beyond = want_beyond
+                        o._cls_vote = None
+                        o._cls_votes = 0
+            # result is None -> la línea no opina este frame; no se toca el conteo.
             if o.beyond is True:
                 beyond.append((o.x, o.y, o.color))
-            else:
+            else:                       # False o None (sin veredicto) -> "mía" (seguro)
                 mine.append((o.x, o.y, o.color))
                 mine_conf.append(o.conf)
         return mine, beyond, mine_conf

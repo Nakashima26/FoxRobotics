@@ -270,6 +270,19 @@ LINE_TRACK_LINE_EMA       = 0.35 # idem para los extremos de la recta con pendie
 # todavía no se estabilizó sobre datos reales de esta recta.
 TURN_RECOVERY_FRAMES = 10
 
+# Clasificación "mía" / "más allá" de la línea naranja
+# (obstacle_memory.classify_and_split): NO es un latch permanente. Cada frame se
+# re-evalúa contra la línea, pero para CAMBIAR el veredicto de un objeto hace
+# falta que el nuevo salga N frames seguidos -- histéresis asimétrica:
+#   - pasar a "mía" (empezar a esquivar algo que se estaba ignorando): pocos
+#     frames. Es el lado SEGURO del error (esquivar de más < chocar de menos), y
+#     recupera rápido de un "más allá" que se fijó por una mala lectura de línea.
+#   - pasar a "más allá" (dejar de esquivar): más frames. Un tramo corto de
+#     lectura de línea ruidosa no debe abandonar una esquiva a medias -- ese era
+#     el motivo original de la clasificación pegajosa.
+LINE_CLASSIFY_FRAMES_TO_MINE   = 3
+LINE_CLASSIFY_FRAMES_TO_BEYOND = 6
+
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=35  →  obs=steer_deg/35
 # Cuando pp=0:  ESP32 usa visionSteerGain=80  (comportamiento V1 actual)
