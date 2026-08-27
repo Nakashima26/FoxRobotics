@@ -185,11 +185,11 @@ def _pass_side_cx(ox: float, side: int, w: int) -> int:
     _enforce_free_mask() no lo cruza al otro lado (ver ahí).
     """
     iox = max(0, min(int(round(ox)), w - 1))
-    # OBS_INFLATE_R (físico + seguridad) + WALL_MARGIN_PX = MISMA holgura que
-    # safe_mask deja alrededor de la lata. Así el path de esquiva pasa con el
-    # mismo aire que el corredor normal -- no más ajustado (no empeora la
-    # seguridad de la esquiva) ni innecesariamente ancho (no dispara el steer).
-    off = C.OBS_INFLATE_R + C.WALL_MARGIN_PX
+    # Se pasa PEGADO al círculo de inflado: OBS_INFLATE_R ya trae el margen de
+    # seguridad (OBS_SAFETY_R_PX) para no rozar la lata, así que basta un pelo
+    # más para caer afuera del borde bloqueado. Más que esto solo abre el arco
+    # de más y dispara el steer.
+    off = C.OBS_INFLATE_R + 4
     return int(min(max(iox + off * side, 0), w - 1))
 
 
@@ -304,7 +304,7 @@ def _enforce_free_mask(points: list[tuple[float, int]], free_mask: np.ndarray, w
         dom = _dominant_pass(int(y), bev_obstacles, pass_sides)
         if dom is not None:
             side, ox = dom
-            edge = int(round(ox + side * (C.OBS_INFLATE_R + C.WALL_MARGIN_PX)))  # holgura = safe_mask, lado WRO
+            edge = int(round(ox + side * (C.OBS_INFLATE_R + 4)))   # pegado al círculo, lado WRO
             if free_cols.size:
                 pass_cols = free_cols[(free_cols.astype(np.int64) - edge) * side >= 0]
                 if pass_cols.size:
