@@ -396,7 +396,8 @@ def detect_centerline(
     y_front_top = max(0, C.ROBOT_BEV_Y - int(C.FRONT_WALL_CRITICAL_PX))
     front_band = free_mask[y_front_top:C.ROBOT_BEV_Y, x_lo:x_hi]
     front_blocked = (
-        not bev_obstacles
+        C.FRONT_WALL_URGENCY_ENABLED
+        and not bev_obstacles
         and front_band.size > 0
         and bool(np.any(front_band == 0))
     )

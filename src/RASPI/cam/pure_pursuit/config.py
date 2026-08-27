@@ -137,6 +137,11 @@ LOOKAHEAD_OBS_FAR_PX  = OBSTACLE_CASUAL_MM / MM_PER_PX   # ≈250px
 CENTERLINE_URGENCY_RELAX = 1.6
 
 # ─── Urgencia frontal por pared (chasis apuntando DE FRENTE, no paralelo) ────
+# DESACTIVADA por defecto: fuerza cx al lado despejado con peso 1.0 SIN rampa
+# (steer duro instantáneo) y en rectas cerca de una esquina, con el piso del
+# BEV parchado adelante, misfireaba. main no tiene esta lógica. Poner True para
+# reactivarla.
+FRONT_WALL_URGENCY_ENABLED = False
 # Si hay pared/no-piso dentro de esta distancia MEDIDA A LO LARGO DEL EJE DEL
 # CHASIS (columna ROBOT_BEV_X, no del hueco que el centerline elige), el
 # chasis mismo está apuntando hacia ella -- distinto de "hay pared cerca a un
