@@ -81,6 +81,14 @@ int   turnHint     = 0;       // turn {-1, 0, +1}
 bool  piPriority   = false;   // prio=1: obstáculo activo en Pi
 int   piMemoryFrames = 0;     // mem=N: frames de memoria restantes
 bool  piPurePursuit = false;  // pp=1: Pi en modo Pure Pursuit
+bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
+                               // FÍSICAMENTE detrás del robot este frame (no que
+                               // simplemente dejó de verlo) — dispara RECUPERANDO.
+bool  piInteriorPass = false; // intr=1: el obstáculo actual se pasa por el mismo
+                               // lado hacia el que va a girar la pista (la Pi ya
+                               // sabe la dirección de giro, por visión, y el color
+                               // del obstáculo) — el giro mismo resuelve el paso,
+                               // no hace falta seguir bloqueando detectarEsquina().
 bool  piReady      = false;
 
 unsigned long lastPiMsgMs = 0;
@@ -97,23 +105,31 @@ const float ppSteerGain = 60.0;
 // geometría (máx ±35°) y suele quedar corto para la mecánica del servo:
 // súbelo si el carrito gira poco, bájalo si oscila/sobregira.
 float ppServoGain = 1.0;
-float PP_GYRO_BLEND = 0.3;   // 0 = solo vision, 1 = solo gyro. Empieza bajo y sube si sigue derivando.
+float PP_GYRO_BLEND = 0.4;   // 0 = solo vision, 1 = solo gyro. Empieza bajo y sube si sigue derivando.
 float PP_WALL_BLEND = .15;
 
 // ── Boot sincronización con Pi ────────────────────────────────────────────────
 bool piReadyReceived = false;
+// READY ya llegó PERO todavía no el primer V2. Entre esos dos, controlPID()
+// caía en el fallback wall-PID y setMotor(velocidadMotor) -> el carro rodaba
+// ~0.5 s hacia adelante sin ver el obstáculo. Con este gate el carro NO rueda
+// hasta el primer V2 real de Pure Pursuit.
+bool piFirstV2Received = false;
+unsigned long readyMs = 0;                          // millis() cuando llegó READY
+const unsigned long FIRST_V2_TIMEOUT_MS = 3000;     // si tras READY nunca llega V2, seguir igual
 unsigned long bootStartMs = 0;
 const unsigned long BOOT_WAIT_PI_MS = 1000;
 
 // ── FSM estados ───────────────────────────────────────────────────────────────
-// RECUPERANDO: la cámara ACABA de dejar de ver un obstáculo (prio 1→0). En vez
-// de que Pure Pursuit intente enderezar solo con lo que ve (lento, impreciso),
-// aquí el wall PID + gyro PID (que YA se calculan siempre, ver controlPID())
-// toman el volante hasta que el robot vuelve a estar centrado/alineado.
+// RECUPERANDO: la Pi confirma (piPasado=1) que el robot YA atravesó
+// físicamente un obstáculo — no que la cámara simplemente dejó de verlo
+// (perder de vista ≠ haber rebasado). En vez de que Pure Pursuit intente
+// enderezar solo con lo que ve en ese instante incierto, aquí el wall PID +
+// gyro PID (que YA se calculan siempre, ver controlPID()) toman el volante
+// hasta que el robot vuelve a estar centrado/alineado.
 enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO };
 Estado estado = SIGUIENDO;
 
-bool  prioAnterior = false;     // para detectar el flanco de bajada prio 1→0
 const float wallSettleCm    = 8.0;   // |distL-distR| por debajo de esto = "centrado"
 const float headingSettleDeg = 8.0;  // |errorGyro| por debajo de esto = "alineado"
 
@@ -218,6 +234,7 @@ void parsePiMessage(String line) {
     piReadyReceived = true;
     piReady         = true;
     lastPiMsgMs     = millis();
+    if (readyMs == 0) readyMs = millis();
     Serial2.println("ACK:READY");
     return;
   }
@@ -273,12 +290,39 @@ void parsePiMessage(String line) {
       piPurePursuit = false;   // mensaje V1 sin campo pp → modo obstáculo
     }
 
-    piReady     = true;
+    // pasado — evento de un solo frame: el robot ya atravesó físicamente el
+    // obstáculo. Ausente en V1 → false por defecto.
+    idx = line.indexOf("pasado=");
+    if (idx >= 0) {
+      int end = line.indexOf(',', idx);
+      String s = (end >= 0) ? line.substring(idx + 7, end) : line.substring(idx + 7);
+      piPasado = (s.toInt() != 0);
+    } else {
+      piPasado = false;
+    }
+
+    // intr — el obstáculo actual se pasa por el mismo lado hacia el que va
+    // a girar la pista (ver corner_lines.py en la Pi). Ausente en V1 o si
+    // la Pi aún no confirmó la dirección de giro → false por defecto
+    // (mismo comportamiento de siempre: sigue bloqueando).
+    idx = line.indexOf("intr=");
+    if (idx >= 0) {
+      int end = line.indexOf(',', idx);
+      String s = (end >= 0) ? line.substring(idx + 5, end) : line.substring(idx + 5);
+      piInteriorPass = (s.toInt() != 0);
+    } else {
+      piInteriorPass = false;
+    }
+
+    piReady           = true;
+    piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
     // Regresamos el heading integrado del gyro para que la Pi pueda mantener
     // su mapa rodante de obstáculos alineado al doblar (obstacle_memory.py).
     Serial2.print("ACK:V2,ang=");
-    Serial2.println(anguloGyro, 2);
+    Serial2.print(anguloGyro, 2);
+    Serial2.print(",est=");
+    Serial2.println(estado == GIRANDO ? "G" : (estado == RECUPERANDO ? "R" : "S"));
     return;
   }
 
@@ -471,7 +515,8 @@ void setup() {
         piReadyReceived = true;
         piReady         = true;
         timeStart = millis();
-        Serial.println("Recibido READY. Iniciando.");
+        readyMs   = millis();
+        Serial.println("Recibido READY. Esperando primer V2...");
       }
     }
     delay(50);
@@ -502,6 +547,19 @@ void loop() {
     // Pasó el timeout de arranque → continuar de todas formas
   }
 
+  // READY llegó PERO todavía no el primer V2 -> NO rodar. Si no, controlPID()
+  // cae en el fallback wall-PID y el carro avanza ~0.5 s sin ver el obstáculo.
+  // Con la Pi mandando el primer V2 justo tras READY, esto son unos ms; el
+  // timeout evita quedar atorado para siempre si la Pi muere tras el READY.
+  if (piReadyReceived && !piFirstV2Received
+      && (millis() - readyMs) < FIRST_V2_TIMEOUT_MS) {
+    escribirServo(centroServo);
+    setMotor(0);
+    Serial.println(" | Estado:WAIT_FIRST_V2");
+    delay(10);
+    return;
+  }
+
   if (raceFinished) {
     setMotor(0);
     escribirServo(centroServo);
@@ -526,20 +584,28 @@ void loop() {
     case SIGUIENDO: {
       velocidadMotor = 180;
 
-      // Flanco de bajada: la cámara ACABA de dejar de ver el obstáculo.
-      // Entrar a RECUPERANDO en vez de confiar en que Pure Pursuit se
-      // enderece solo con lo que ve en ese instante incierto.
-      if (prioAnterior && !piPriority) {
+      // La Pi confirma que el robot ya atravesó físicamente el obstáculo
+      // (evento de un solo frame) -> entrar a RECUPERANDO. Ya no depende de
+      // que la cámara simplemente haya dejado de verlo.
+      if (piPasado) {
         estado = RECUPERANDO;
         recuperandoEntryMs = millis();
         integralWall  = 0; prevErrorWall  = 0;
         integralGyro  = 0; prevErrorGyro  = 0;
 
-        prioAnterior = piPriority;
+        // Consumir el pulso.  piPasado es un evento de UN frame en la Pi, pero
+        // en el ESP32 se queda en 1 hasta que llega el siguiente mensaje V2
+        // (~70-150 ms) y el loop() corre cientos de veces en ese lapso.  Sin
+        // esto, si RECUPERANDO sale rápido (headingOk ya se cumple porque el
+        // rebase fue casi recto), SIGUIENDO vuelve a entrar a RECUPERANDO en la
+        // iteración siguiente con el MISMO pulso viejo -> rebote de estado y
+        // reseteo repetido de integrales / patada en la derivada del servo.
+        // Un rebase nuevo real llega en otro mensaje y vuelve a poner piPasado=1.
+        piPasado = false;
+
         controlPID(distL, distR);   // ya toma el branch RECUPERANDO (estado ya cambió)
         break;
       }
-      prioAnterior = piPriority;
 
       controlPID(distL, distR);
 
@@ -547,12 +613,17 @@ void loop() {
       // hace falta aquí — mientras el chasis sigue desalineado, ese trabajo
       // lo hace el estado RECUPERANDO, que ni siquiera llega a evaluar
       // detectarEsquina() porque vive en otro case del switch.)
-      bool bloqueadoPorObstaculo = piPriority || (piMemoryFrames > 0);
+      // Excepción: si el obstáculo se pasa por el mismo lado hacia el que
+      // ya se sabe que va a girar la pista (piInteriorPass), el giro mismo
+      // resuelve el paso — no tiene caso seguir bloqueando. piInteriorPass
+      // es false por defecto (sin dirección confirmada aún, o exterior),
+      // así que sin eso el comportamiento es idéntico al de siempre.
+      bool bloqueadoPorObstaculo = (piPriority || (piMemoryFrames > 0)) && !piInteriorPass;
 
       if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo
           && detectarEsquina(distL, distR)
-          && millis() - timeStart > 5000) 
+          && millis() - timeStart > 3000) 
       {
         estado     = GIRANDO;
         anguloGyro = 0;
@@ -587,7 +658,6 @@ void loop() {
         // de una esquina real, donde un lado lee "sin pared" legítimamente).
         estado = SIGUIENDO;
       }
-      prioAnterior = piPriority;
       break;
     }
 
@@ -641,6 +711,7 @@ void loop() {
   Serial.print(" | turn:");     Serial.print(turnHint);
   Serial.print(" | prio:");     Serial.print(piPriority ? 1 : 0);
   Serial.print(" | mem:");      Serial.print(piMemoryFrames);
+  Serial.print(" | intr:");     Serial.print(piInteriorPass ? 1 : 0);
   Serial.print(" | giros:");    Serial.print(turnsCompleted);
   Serial.print("/");            Serial.println(TURNS_PER_RACE);
 }

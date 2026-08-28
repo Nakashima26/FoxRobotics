@@ -23,7 +23,7 @@ from vision import Vision
 
 WOOD_LOWER = np.array([5, 25, 40])
 WOOD_UPPER = np.array([35, 180, 255])
-OUTPUT_PATTERN = re.compile(r"^orillas(\d+)\.mp4$")
+OUTPUT_PATTERN = re.compile(r"^orillas(\d+)\.(?:mp4|avi)$")
 CAM_FRAME_PATH = "/tmp/wro_cam_frame.jpg"
 
 
@@ -73,7 +73,12 @@ class ThreadedFrameGrabber:
 
 
 def create_writer(output_path: str, frame_width: int, frame_height: int, fps: float):
-	fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+	# MJPG en .avi: cada frame es un JPEG independiente y el .avi escribe los
+	# frames de forma progresiva -> si el proceso muere sin cerrar (congelado,
+	# brownout, SIGKILL) el archivo QUEDA REPRODUCIBLE hasta donde alcanzó a
+	# escribir. mp4v en .mp4 no: el índice (moov) se escribe solo en release()
+	# y sin él ffmpeg/VLC no abren nada (se perdieron orillas37..373).
+	fourcc = cv2.VideoWriter_fourcc(*"MJPG")
 	return cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
 
 
@@ -126,18 +131,18 @@ def next_output_path(directory: Path) -> Path:
 	directory.mkdir(parents=True, exist_ok=True)
 
 	highest_index = 0
-	for candidate in directory.glob("orillas*.mp4"):
+	for candidate in directory.iterdir():
 		match = OUTPUT_PATTERN.match(candidate.name)
 		if match:
 			highest_index = max(highest_index, int(match.group(1)))
 
-	return directory / f"orillas{highest_index + 1}.mp4"
+	return directory / f"orillas{highest_index + 1}.avi"
 
 
 def resolve_output_path(output_path: str | None) -> Path:
 	if output_path:
 		path = Path(output_path)
-		if path.suffix.lower() == ".mp4" and OUTPUT_PATTERN.match(path.name):
+		if path.suffix.lower() in (".mp4", ".avi") and OUTPUT_PATTERN.match(path.name):
 			return next_output_path(path.parent)
 		if path.is_dir() or not path.suffix:
 			return next_output_path(path)
@@ -239,8 +244,13 @@ class SerialLink:
 		self.port = port
 		self.baudrate = baudrate
 		self.fd = None
-		self._queue = Queue(maxsize=4)
+		# Cola grande: si el hilo aún no drena (settle inicial) los primeros
+		# mensajes NO se deben perder (maxsize=4 los tiraba en silencio ->
+		# el ESP32 arrancaba sin comandos -> wall-PID de fallback = "el carro
+		# avanza y no le entran datos de la Pi").
+		self._queue = Queue(maxsize=256)
 		self._last_rx = ""
+		self._ready = threading.Event()   # se activa cuando el UART está listo
 		self._thread = threading.Thread(target=self._run, daemon=True)
 		self._thread.start()
 
@@ -269,11 +279,18 @@ class SerialLink:
 
 			termios.tcsetattr(self.fd, termios.TCSANOW,
 			                   [iflag, oflag, cflag, lflag, ispeed, ospeed, cc])
-			time.sleep(1.0)
+			time.sleep(0.5)   # settle de línea / boot del ESP32
+			try:
+				termios.tcflush(self.fd, termios.TCIOFLUSH)   # descarta basura de arranque
+			except Exception:
+				pass
+			self._ready.set()   # a partir de aquí open() deja de bloquear
 			print(f"[SERIAL] UART abierto en {self.port} @ {self.baudrate}", flush=True)
-			for _ in range(3):
-				os.write(self.fd, b"READY,pi=1\n")
-				time.sleep(0.06)
+			# El READY lo manda run() DESPUES del warmup de camara (ver
+			# IntegratedRuntime.run / PPRuntime.run). Antes se enviaba aqui
+			# "READY,pi=1" ~1s tras abrir el UART -- ANTES de que la vision
+			# estuviera lista -- y el ESP32 salia de setup() y arrancaba a rodar
+			# en wall-PID de fallback mientras la Pi seguia calentando la camara.
 		except Exception as exc:
 			self.fd = None
 			print(f"[SERIAL] No se pudo abrir UART ({self.port}): {exc}", flush=True)
@@ -305,8 +322,17 @@ class SerialLink:
 			except Exception:
 				pass
 
-	def open(self):
-		pass
+	def open(self, timeout: float = 5.0) -> bool:
+		"""Bloquea hasta que el hilo del UART terminó el setup + settle.
+
+		ANTES era un no-op: run() seguía al warmup y al loop mientras el hilo
+		seguía en su sleep inicial, así que los primeros comandos V2 se
+		encolaban y se perdían (cola de 4) y el ESP32 rodaba sin datos.
+		"""
+		ok = self._ready.wait(timeout=timeout)
+		if not ok:
+			print("[SERIAL] open() timeout: el UART no quedó listo a tiempo", flush=True)
+		return ok
 
 	def send_line(self, line: str):
 		try:
@@ -542,6 +568,16 @@ class IntegratedRuntime:
 			else:
 				time.sleep(0.01)
 		print("[INFO] Camara estabilizada.", flush=True)
+
+		# READY explicito: recien ahora que la camara esta lista y el pipeline
+		# va a empezar a mandar control, avisar al ESP32 para que salga de
+		# setup() y arranque motores. x3 por si se pierde el primer byte al
+		# arrancar el UART. (Antes lo mandaba el hilo de SerialLink ~1s tras
+		# abrir el UART, ANTES del warmup.)
+		for _ in range(3):
+			self.serial_link.send_line("READY")
+			time.sleep(0.05)
+		print("[INFO] READY enviado al ESP32.", flush=True)
 
 		if on_ready is not None:
 			on_ready()
