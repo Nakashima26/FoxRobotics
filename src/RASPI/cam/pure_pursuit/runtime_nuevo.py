@@ -127,6 +127,16 @@ class PPRuntime:
         self._is_turning: bool = False
         self._turn_start_t: float | None = None
         self._turn_recovery_frames: int = 0
+        self._pasado_hold: int = 0   # frames restantes repitiendo pasado=1
+
+        # ── Trigger de RECUPERANDO por ESTADO MEDIDO (ver _measured_recup_trigger) ──
+        self._heading_ref: float | None = None   # heading de la recta al ARMARSE la esquiva
+        self._dodge_armed: bool = False          # hubo una esquiva de verdad en curso
+        self._recup_can_arm: bool = True         # gate: solo re-arma tras un peso bajo (esquiva nueva)
+        self._recup_arm_streak: int = 0          # frames seguidos con peso alto (debounce de armado)
+        self._recup_clear_count: int = 0         # frames seguidos con el path ya despejado
+        self._g_streak: int = 0                  # est=G consecutivos (debounce de giro)
+        self._last_recup_reason: str = "-"       # para overlay / journalctl
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
@@ -159,6 +169,173 @@ class PPRuntime:
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
                 f"state={state},prio={int(has_obstacle)},mem={n_mem_obs},pp=1,"
                 f"pasado={int(pasado)},intr={int(interior)}")
+
+    # ── Trigger de RECUPERANDO por ESTADO MEDIDO ──────────────────────────────
+
+    def _measured_recup_trigger(self, cl_stats: dict, bev_obstacles: list) -> bool:
+        """
+        Decide si el robot ACABA de rebasar un obstáculo de LADO (esquiva de
+        ángulo) — el disparo de RECUPERANDO que el ancla "geom" nunca acertó.
+
+        NO hace dead-reckoning propio: usa la posición que la memoria YA tiene de
+        la lata (o.x/o.y — corregida por detecciones frescas mientras se ve, y
+        arrastrada por el MISMO ego-movimiento que ve la centerline cuando no) y
+        el heading real. Dispara cuando se cumplen las tres:
+
+          1. Hubo una esquiva DE VERDAD en curso: el peso de esquiva de
+             detect_centerline (cl_stats["weights"]) llegó a >= RECUP_MEAS_ARM_W
+             en alguna fila junto al eje -> self._dodge_armed.
+          2. Ya NO hay lata "estorbando" derecho adelante: ninguna Red/Green de
+             la memoria está a la vez > AHEAD_TOL px adelante del eje Y a menos
+             de CLEAR_PX px de lado (yendo recto el borde del carro la libra).
+             Debe cumplirse RECUP_MEAS_CLEAR_FRAMES frames seguidos.
+          3. El chasis quedó chueco vs la recta: |heading - heading_ref| >=
+             RECUP_MEAS_HEADING_DEG. heading_ref se fija al ARMARSE (heading de
+             la recta antes de empezar a rodear).
+
+        (3) separa "esquiva suave con espacio" (heading chico -> NO dispara, PP +
+        wall PID enderezan solos) de "latiguazo sin espacio" (heading grande ->
+        dispara justo al terminar de rodear la lata).
+
+        Devuelve True UNA sola vez por esquiva (se desarma al disparar).
+        """
+        if not getattr(C, "RECUP_MEAS_ENABLED", True):
+            return False
+
+        # OJO: cl_stats["weights"] mezcla el peso de esquiva de LATA con el peso
+        # 1.0 que detect_centerline pone en filas SIN PISO (pared de frente,
+        # proyección de tendencia). Esas ramas solo corren si NO hay lata de
+        # color en la lista -> si no hay Red/Green, el peso junto al eje NO es de
+        # esquiva y no debe armar nada.
+        has_color_obs = any(c in ("Red", "Green") for _, _, c in bev_obstacles)
+        weights = cl_stats.get("weights") or []
+        # points[0] es la fila más cercana al eje; ROW_STEP px entre filas.
+        n_near = max(1, int(C.RECUP_MEAS_NEAR_PX / C.CENTERLINE_ROW_STEP))
+        max_w_near = max(weights[:n_near], default=0.0) if has_color_obs else 0.0
+
+        # (1) ARMAR — LATCH. Una vez que el planner rodeó una lata de verdad
+        # (max_w_near >= ARM_W), _dodge_armed queda en True y el chequeo de
+        # disparo corre CADA frame -- NO se re-arma-y-retorna mientras el peso
+        # siga alto (ese era el bug de orillas412: conf ~1.0 mantenía el peso
+        # arriba toda la esquiva, así que el disparo solo se evaluaba tras el
+        # prune de la lata -> igual de tarde que BEHIND_PAD). heading_ref se
+        # siembra UNA vez, al armar.
+        # Tras disparar, no re-armar hasta que el peso baje de ARM_W al menos un
+        # frame -> exige una esquiva NUEVA (transición bajo->alto), no la misma
+        # lata que sigue en memoria mientras el ESP32 endereza (evita re-disparo
+        # de RECUPERANDO en cadena sobre el mismo obstáculo).
+        # Debounce de armado: la esquiva tiene que estar en curso ARM_FRAMES
+        # frames seguidos (peso alto) antes de armar. Un verde que se ve 1 solo
+        # frame y se pierde (tras un giro, FOV rasante) ya NO arma -> no entra
+        # a RECUPERANDO "super rápido" con la lata todavía enfrente (orillas417/8).
+        if max_w_near >= C.RECUP_MEAS_ARM_W:
+            self._recup_arm_streak = getattr(self, "_recup_arm_streak", 0) + 1
+        else:
+            self._recup_arm_streak = 0
+            self._recup_can_arm = True
+        if (self._recup_arm_streak >= getattr(C, "RECUP_MEAS_ARM_FRAMES", 3)
+                and not self._dodge_armed
+                and getattr(self, "_recup_can_arm", True)):
+            self._dodge_armed = True
+            self._recup_can_arm = False
+            self._recup_clear_count = 0
+            self._heading_ref = None   # se siembra abajo con el heading de ESTE frame
+
+        # Siembra PEREZOSA de heading_ref: en cuanto haya heading y la esquiva
+        # esté armada. Antes se sembraba SOLO en el frame de armado -> si se armó
+        # sin heading (p.ej. el trigger llegó a correr desarmado, o el ACK aún no
+        # traía ang=), quedaba en None para siempre y heading_err=0 -> measured
+        # nunca disparaba (bug de orillas414).
+        if (self._dodge_armed and self._heading_ref is None
+                and self._last_heading is not None):
+            self._heading_ref = self._last_heading
+
+        heading_err = 0.0
+        if self._last_heading is not None and self._heading_ref is not None:
+            heading_err = (self._last_heading - self._heading_ref + 180.0) % 360.0 - 180.0
+
+        if not self._dodge_armed:
+            return False
+
+        # (2) ¿alguna lata todavía estorbando adelante? SOLO por distancia
+        # LONGITUDINAL (ry - oy). NO se usa la x de la lata: cuando la lata está
+        # cerca de la cámara su proyección BEV se "unta" y o.x se queda pegada al
+        # centro toda la esquiva (visto en pista: red x=232->179->193 mientras el
+        # carro giraba 60°) -> con el término lateral "blocking" no se limpiaba
+        # nunca y el disparo caía igual de tarde que el respaldo BEHIND_PAD.
+        #
+        # ahead_tol ESCALA con el giro: al enderezar desde herr grande el morro
+        # barre un arco grande y lo puede meter en la lata si ésta sigue adelante
+        # (orillas415: verde disparó a herr+59 con la lata 72px adelante -> morro
+        # dentro del verde). Cuanto mayor el giro, más cerca del eje (o detrás)
+        # debe estar la lata para disparar.
+        ry = C.ROBOT_BEV_Y
+        _tol0 = float(getattr(C, "RECUP_MEAS_AHEAD_TOL_PX", 90.0))
+        _hlo  = float(getattr(C, "RECUP_MEAS_AHEAD_TOL_HARD_LO", 45.0))
+        _hhi  = float(getattr(C, "RECUP_MEAS_AHEAD_TOL_HARD_HI", 68.0))
+        _a = abs(heading_err)
+        if _a <= _hlo:
+            ahead_tol = _tol0                       # esquiva "normal": tol pleno
+        elif _a >= _hhi:
+            ahead_tol = 0.0                         # latiguazo extremo: lata al eje o detrás
+        else:
+            ahead_tol = _tol0 * (_hhi - _a) / (_hhi - _hlo)
+        blocking = any(
+            c in ("Red", "Green") and (ry - oy) > ahead_tol
+            for (ox, oy, c) in bev_obstacles
+        )
+        # Respaldo: si el planner tampoco rodea nada junto al eje, está despejado
+        # aunque la memoria aún cargue la lata en algún lado raro.
+        path_clear = (not blocking) or (max_w_near <= C.RECUP_MEAS_CLEAR_W)
+
+        if not path_clear:
+            self._recup_clear_count = 0
+            self._last_recup_reason = (
+                f"rodeando herr={heading_err:+.0f} w={max_w_near:.2f} "
+                f"atol={ahead_tol:.0f}")
+            return False
+        self._recup_clear_count += 1
+
+        # (3) DISPARAR en cuanto la lata quedó atrás Y el chasis está chueco de
+        # verdad. El chequeo corre cada frame mientras se sigue "despejado" -->
+        # aunque el heading TODAVÍA esté creciendo (mitad del latiguazo), dispara
+        # en el frame en que cruza HEADING_DEG. Antes se desarmaba a la primera
+        # de |herr|<HEADING_DEG con el path despejado y perdía el latiguazo que
+        # aún no llegaba a 25° (visto en sim con la traza de la red de orillas412).
+        if (self._recup_clear_count >= C.RECUP_MEAS_CLEAR_FRAMES
+                and abs(heading_err) >= C.RECUP_MEAS_HEADING_DEG):
+            self._last_recup_reason = (
+                f"PASADO(medido) herr={heading_err:+.0f} "
+                f"clr={self._recup_clear_count}")
+            self._dodge_armed = False
+            self._recup_clear_count = 0
+            self._heading_ref = None
+            return True
+
+        # Despejado MUCHOS frames y el heading nunca llegó a HEADING_DEG ->
+        # esquiva suave que se resolvió sola. Desarmar sin RECUPERANDO, y
+        # permitir re-armar (la siguiente lata sí puede necesitar RECUPERANDO).
+        # OLVIDAR la lata: si el path está despejado tanto tiempo y no hubo
+        # latiguazo, la lata ya quedó al costado -> que la centerline deje de
+        # rodearla (si no, un cono que se queda pegado al eje trasero, giro~0,
+        # re-detectado, mantiene prio=1 y el steer oscilando -- visto lap 3
+        # orillas420: R en y~321 falta+24 por decenas de frames).
+        if self._recup_clear_count >= getattr(C, "RECUP_MEAS_GENTLE_FRAMES", 10):
+            self._last_recup_reason = f"esquiva-suave-ok herr={heading_err:+.0f}"
+            self._dodge_armed = False
+            self._recup_can_arm = True
+            self._recup_clear_count = 0
+            self._heading_ref = None
+            # Solo olvidar si NINGÚN cono sigue de verdad adelante (>40px del
+            # eje): así no se borra un obstáculo que el carro tiene justo
+            # enfrente y todavía debe rodear.
+            if not any(c in ("Red", "Green") and (ry - oy) > 40.0
+                       for (ox, oy, c) in bev_obstacles):
+                self.memory.forget_color_obstacles()
+        else:
+            self._last_recup_reason = (
+                f"despejado herr={heading_err:+.0f} clr={self._recup_clear_count}")
+        return False
 
     # ── Captura ───────────────────────────────────────────────────────────────
 
@@ -354,6 +531,9 @@ class PPRuntime:
                 obstacle_conf: list[float] = []   # alineado 1:1 con bev_obstacles
                 pp_active     = False
                 pasado        = False
+                measured_pass = False
+                cl_stats: dict = {}
+                lookahead_eff = float(C.LOOKAHEAD_MAX_PX)   # diag: lookahead PP usado este frame
                 line_info     = {"Orange": {"seen": False, "near_y": None}}
                 bev_obstacles_beyond = []
                 interior      = False
@@ -388,6 +568,18 @@ class PPRuntime:
                         _t2 = time.perf_counter()
                         bev_timing["proj"] = (_t2 - _t1) * 1000.0
 
+                        # Diag detección: lo que la CÁMARA ve (crudo) y si proyectó
+                        # al BEV. Para el verde que "no se ve tras el giro":
+                        # distinguir "no detectado" (cam=0) de "detectado pero no
+                        # proyecta" (cam>0, bev=0 -> far_objects).
+                        _camR = len(positions.get("Red", []))
+                        _camG = len(positions.get("Green", []))
+                        if _camR or _camG or new_obstacles or far_objects:
+                            print(f"[DET] camR={_camR} camG={_camG} "
+                                  f"bev={[(round(a),round(b),c[0]) for a,b,c in new_obstacles]} "
+                                  f"far={[(round(fx),c[0]) for fx,_w,_h,c in far_objects]}",
+                                  flush=True)
+
                         # ── Memoria rodante: apagada durante el giro para evitar fantasmas ──
                         # (Solo con obstáculos BEV reales — el far_hint NO entra aquí)
                         if self._is_turning:
@@ -397,14 +589,21 @@ class PPRuntime:
                             bev_obstacles = self.memory.update(
                                 new_obstacles, dt_s, self._last_heading,
                                 estado=self._prev_estado,
+                                # steer del frame ANTERIOR (compute() aún no corre
+                                # este frame) -> modelo de bicicleta del ancla geom.
+                                steer_deg=self.controller._prev_steer_deg,
                             )
                             # Alineado 1:1 con bev_obstacles (mismo orden) --
                             # ver detect_centerline(obstacle_conf=).
                             obstacle_conf = list(self.memory.last_confidences)
-                            # Evento de un solo frame: un obstáculo quedó detrás
-                            # del robot recién en este update -> "ya lo pasé de
-                            # verdad", no "dejé de verlo". Dispara RECUPERANDO.
-                            pasado = self.memory.last_passed
+                            # "PASADO y" de _prune: la lata cayó por DETRÁS del eje
+                            # (rebase DE FRENTE) o salió por el borde inferior del
+                            # BEV. Respaldo del trigger medido, que cubre el rebase
+                            # de ÁNGULO. El pulso pasado=1 se finaliza más abajo
+                            # (tras detect_centerline), ya OR-eado con el medido.
+                            if self.memory.last_passed:
+                                self._pasado_hold = max(self._pasado_hold,
+                                                        C.PASADO_HOLD_FRAMES)
                         _t3 = time.perf_counter()
                         bev_timing["mem"] = (_t3 - _t2) * 1000.0
 
@@ -468,19 +667,59 @@ class PPRuntime:
                         # por él. Sin dirección confirmada, default seguro:
                         # False (bloquea igual que siempre).
                         interior = False
-                        if bev_obstacles and turn_dir is not None:
+                        if (getattr(C, "INTERIOR_PASS_ENABLED", True)
+                                and bev_obstacles and turn_dir is not None):
                             closest = max(bev_obstacles, key=lambda o: o[1])
                             interior = is_interior_pass(turn_dir, closest[2])
+
+                        # ── DEBUG clasificación mine/beyond + turn-dir ──
+                        # (solo cuando hay algo "beyond" -> el caso que fijó mal
+                        # la dirección; ver TurnDirectionTracker).
+                        if bev_obstacles_beyond:
+                            print(f"[CLASS] mia={[(round(x),round(y),c) for x,y,c in bev_obstacles]} "
+                                  f"beyond={[(round(x),round(y),c) for x,y,c in bev_obstacles_beyond]} "
+                                  f"turn_dir={turn_dir} interior={interior} "
+                                  f"orange_near_y={orange_info.get('near_y')}", flush=True)
                         _t4 = time.perf_counter()
                         bev_timing["line"] = (_t4 - _t3) * 1000.0
 
                         # Detectar centerline (con obstáculos recordados+nuevos,
                         # ya sin los que quedaron más allá de la naranja)
                         path_points = detect_centerline(
-                            bev_frame, bev_obstacles, bev_hsv=bev_hsv, obstacle_conf=obstacle_conf
+                            bev_frame, bev_obstacles, bev_hsv=bev_hsv,
+                            obstacle_conf=obstacle_conf, stats_out=cl_stats,
                         )
                         _t5 = time.perf_counter()
                         bev_timing["dc"] = (_t5 - _t4) * 1000.0
+
+                        # ── Trigger de RECUPERANDO por ESTADO MEDIDO ──────────
+                        # Sustituto del ancla "geom". Usa cl_stats["weights"] (lo
+                        # que el planner de verdad decidió esquivar este frame) +
+                        # el heading real -> sin dead-reckoning que derive.
+                        # SOLO armado: desarmado no hay heading (ACK=None) ni
+                        # movimiento, y si se armaba ahí quedaba sin heading_ref
+                        # para siempre (bug orillas414). Apagado también en el
+                        # giro y su cooldown.
+                        # `_prev_estado != "G"`: en cuanto el ESP32 entra a
+                        # GIRANDO resetea su anguloGyro a 0 -> el heading que
+                        # llega en el ACK SALTA ~90° de golpe -> heading_err se
+                        # dispara y measured firaba a herr=+89 en pleno giro
+                        # (orillas417). Con esto el trigger se apaga al PRIMER
+                        # est=G, sin esperar la confirmación de 2 frames.
+                        if (armed and not self._is_turning and self._prev_estado != "G"
+                                and not en_recuperacion_giro):
+                            measured_pass = self._measured_recup_trigger(
+                                cl_stats, bev_obstacles
+                            )
+                            if measured_pass:
+                                self._pasado_hold = max(self._pasado_hold,
+                                                        C.PASADO_HOLD_FRAMES)
+                                # Olvida el cono YA: la centerline del PRÓXIMO
+                                # frame deja de rodearlo -> el carro sale del
+                                # arco en vez de seguir clavando el volante
+                                # (comportamiento del modo "angle" viejo, que
+                                # era lo que mantenía la esquiva fluida).
+                                self.memory.forget_color_obstacles()
 
                         if len(path_points) >= C.MIN_PATH_PTS:
                             # Lookahead ADAPTATIVO: se acorta (~45 px) cuando hay
@@ -524,6 +763,29 @@ class PPRuntime:
                 else:
                     self.far_hint.reset_all()
 
+                # ── Finalizar el pulso pasado=1 ──────────────────────────────
+                # OR de las dos vías: memory.last_passed (rebase de FRENTE, "PASADO
+                # y" / borde) ya subió _pasado_hold arriba; el trigger MEDIDO
+                # (rebase de ÁNGULO) lo subió tras detect_centerline. Aquí solo se
+                # emite el hold y se decrementa -- una sola vez por frame, corra o
+                # no el pipeline BEV.
+                # SUPRIMIR si la esquina es inminente: con la línea naranja cerca
+                # (near_y grande), el ESP32 está por girar. Un pasado=1 aquí lo
+                # mete a RECUPERANDO -> en ese estado NO evalúa detectarEsquina()
+                # -> el giro entra ~0.5s tarde y el carro se lleva el cono de la
+                # recta siguiente (orillas420/421). El giro mismo endereza; no
+                # hace falta RECUPERANDO ciego encima.
+                _oy = line_info["Orange"].get("near_y")
+                _corner_soon = (line_info["Orange"].get("seen")
+                                and _oy is not None
+                                and _oy >= getattr(C, "RECUP_SUPPRESS_NEAR_ORANGE_Y", 300.0))
+                if _corner_soon and self._pasado_hold > 0:
+                    self._pasado_hold = 0
+                    self._last_recup_reason = f"pasado suprimido (esquina, oy={_oy:.0f})"
+                pasado = self._pasado_hold > 0
+                if self._pasado_hold > 0:
+                    self._pasado_hold -= 1
+
                 # Sin línea válida → recto (obs=0).
                 state = "pp_follow" if pp_active else "no_path"
 
@@ -546,18 +808,43 @@ class PPRuntime:
 
                 estado_now = _parse_estado(serial_ack)
                 if estado_now is not None:
-                    if estado_now == "G" and self._prev_estado != "G":
+                    # Debounce: un est=G ESPURIO (ACK con ruido, "est=G fantasma
+                    # tras verde") ya no dispara el wipe de memoria a media
+                    # esquiva. Un giro real manda est=G muchos frames seguidos;
+                    # se exigen TURN_EST_G_CONFIRM_FRAMES consecutivos.
+                    if estado_now == "G":
+                        self._g_streak += 1
+                        # Desarmar la esquiva medida al PRIMER est=G (sin esperar
+                        # confirmación): el ESP32 ya reseteó anguloGyro -> el
+                        # heading del ACK saltó ~90° -> heading_err es basura y
+                        # measured firaría espurio (orillas417 herr=+89).
+                        self._dodge_armed = False
+                        self._recup_can_arm = True
+                        self._recup_clear_count = 0
+                        self._heading_ref = None
+                    else:
+                        self._g_streak = 0
+                    g_confirmed = self._g_streak >= C.TURN_EST_G_CONFIRM_FRAMES
+
+                    if g_confirmed and not self._is_turning:
                         # Empieza el giro físico -> vaciar YA y apagar la memoria.
                         self.memory.reset()
                         self.line_tracker.reset()   # la línea ya quedó atrás, no aplica a la recta nueva
                         self._is_turning   = True
                         self._turn_start_t = now
-                        print("[MEM] Giro detectado — memoria de obstáculos desactivada.", flush=True)
+                        # La esquiva (si había) muere con el giro.
+                        self._dodge_armed = False
+                        self._recup_can_arm = True
+                        self._recup_clear_count = 0
+                        self._heading_ref = None
+                        print(f"[MEM] Giro detectado (est=G x{self._g_streak}) — "
+                              f"memoria de obstáculos desactivada.", flush=True)
                     elif estado_now != "G" and self._is_turning:
                         # Terminó el giro -> la memoria ya está vacía (no se tocó), arranca
                         # limpia con las detecciones frescas de este frame.
                         self._is_turning = False
                         self._turn_recovery_frames = C.TURN_RECOVERY_FRAMES
+                        self._heading_ref = None   # ref fresca para la esquiva de la recta nueva
                         print("[MEM] Giro terminado — memoria de obstáculos reactivada.", flush=True)
                     self._prev_estado = estado_now
 
@@ -584,6 +871,15 @@ class PPRuntime:
                 print(f"[MEMDBG] closest={self.memory.debug_closest()} "
                       f"prune={self.memory.last_prune_reason} "
                       f"all={self.memory.debug_all()}", flush=True)
+                print(f"[RECUP] {self._last_recup_reason} "
+                      f"armed={int(self._dodge_armed)} clr={self._recup_clear_count} "
+                      f"href={'-' if self._heading_ref is None else round(self._heading_ref)} "
+                      f"pasado={int(pasado)} measured={int(measured_pass)}", flush=True)
+                # Diag esquiva: steer final (deg) que se manda, lookahead usado,
+                # y n_obstáculos. Para ver si el carro ARQUEA (steer moderado, la
+                # y del cono avanza en [MEMDBG]) o PIVOTEA (steer al tope, y clavada).
+                print(f"[PPDIAG] steer={steer_deg:+.1f}deg obs={obs_norm:+.3f} "
+                      f"lka={lookahead_eff:.0f} nobs={len(bev_obstacles)}", flush=True)
 
                 t_ser = time.perf_counter()
                 timing_ms["ser"] = (t_ser - t_bev) * 1000.0

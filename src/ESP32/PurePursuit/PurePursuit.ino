@@ -146,7 +146,7 @@ bool primerGiro         = false;
 int  AngGiro            =88;
 unsigned long lastTurnTime = 0;
 int timeStart = 0;
-const int cooldownGiro     = 1500;   // ms entre giros
+const int cooldownGiro     = 2000;   // ms entre giros
 
 // ── Detección de esquinas ─────────────────────────────────────────────────────
 int contadorEsquina    = 0;
@@ -620,10 +620,20 @@ void loop() {
       // así que sin eso el comportamiento es idéntico al de siempre.
       bool bloqueadoPorObstaculo = (piPriority || (piMemoryFrames > 0)) && !piInteriorPass;
 
+      // 2026-08-28: gate de alineación. En un latiguazo de esquiva el chasis
+      // queda ladeado (visto en pista a +37deg) y un ultrasónico lateral lee
+      // "sin pared" -> detectarEsquina() disparaba una falsa esquina.
+      // 25° (no 15): con 15 el carro no lograba mantenerse recto y NO detectaba
+      // la esquina real -> se iba de frente. 25 bloquea el latiguazo (37°) pero
+      // permite esquinas reales con algo de error de heading. (Con
+      // INTERIOR_PASS_ENABLED=False el bloqueo por obstáculo ya tapa el caso
+      // original; esto es red de seguridad.)
+      bool chasisAlineado = fabs(anguloGyro) < 25.0f;
+
       if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo
           && detectarEsquina(distL, distR)
-          && millis() - timeStart > 3000) 
+          && millis() - timeStart > 3000)
       {
         estado     = GIRANDO;
         anguloGyro = 0;

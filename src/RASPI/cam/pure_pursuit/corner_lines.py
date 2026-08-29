@@ -350,15 +350,37 @@ class TurnDirectionTracker:
             self._candidate_count = 0
             return None
 
-        guess = "R" if bev_obstacles_beyond[0][0] > robot_x else "L"
+        # 2026-08-28: guard de offset mínimo. En pista se fijó "L" con un rojo en
+        # x=194 (rx=200, offset 6px = ruido) clasificado "beyond". Una lata en la
+        # SIGUIENTE recta, tras una esquina de 90°, cae CLARAMENTE a un lado; un
+        # offset de pocos px no es señal de dirección. Exigir separación real.
+        ox0 = bev_obstacles_beyond[0][0]
+        if abs(ox0 - robot_x) < 40.0:
+            self._candidate = None
+            self._candidate_count = 0
+            return None
+
+        guess = "R" if ox0 > robot_x else "L"
         if guess == self._candidate:
             self._candidate_count += 1
         else:
             self._candidate = guess
             self._candidate_count = 1
 
-        if self._candidate_count >= self.persist_frames:
+        just_fixed = False
+        if self._candidate_count >= self.persist_frames and self.direction is None:
             self.direction = self._candidate
+            just_fixed = True
+
+        # DEBUG: por qué se elige/fija la dirección de giro (se fijó "L" mal en
+        # pista por el rojo del arranque clasificado "beyond"). Log en el
+        # cambio de candidato, los primeros conteos, y al fijar.
+        if just_fixed or self._candidate_count <= 2:
+            ox, oy, oc = bev_obstacles_beyond[0]
+            print(f"[TURNDIR] {'>>> FIJADA ' if just_fixed else ''}"
+                  f"cand={self._candidate} x{self._candidate_count}/{self.persist_frames} "
+                  f"obs0=({ox:.0f},{oy:.0f},{oc}) rx={robot_x:.0f} "
+                  f"beyond_n={len(bev_obstacles_beyond)}", flush=True)
 
         return self.direction
 

@@ -102,20 +102,28 @@ def _widest_free_segment(row_mask: np.ndarray, min_width: int) -> int | None:
 def _ramp_weight(row_y: int, obs_y: float) -> float:
     """
     0 = ignorar la lata (usar centro del pasillo), 1 = lado de paso completo.
-    La rampa entra al acercarse a la lata y se mantiene en 1 en el inflado;
-    al rebasarla decae en un radio de inflación para volver al centro.
+    Entra sobre CENTERLINE_RAMP_PX, se mantiene en 1 dentro del inflado, y SALE
+    sobre CENTERLINE_EXIT_RAMP_PX (más corto que la entrada, pero varias filas).
+
+    2026-08-28: antes salía sobre `full_r` (~36 px = ~2 filas) -> apenas librado
+    el círculo, el path se enganchaba de golpe al centro (302->200 en 3 filas)
+    = "brinco hacia adentro" que cruzaba el borde del inflado. Una salida sobre
+    ~90 px la vuelve un arco limpio; NO se usa la rampa de entrada completa
+    (~200 px) para no dejar el path sesgado al lado de la lata tanto tramo por
+    delante que estorbe a la SIGUIENTE lata (rojo->verde, lados opuestos).
     """
     full_r = float(C.OBS_INFLATE_R)
     ramp = max(full_r + 1.0, float(C.CENTERLINE_RAMP_PX))
+    exit_ramp = max(full_r + 1.0, float(getattr(C, "CENTERLINE_EXIT_RAMP_PX", 90.0)))
     d = float(row_y) - float(obs_y)  # >0: la fila aún no llega a la lata
 
-    if d >= ramp:
+    if d >= ramp or d <= -exit_ramp:
         return 0.0
     if d > full_r:
-        return 1.0 - (d - full_r) / (ramp - full_r)
+        return 1.0 - (d - full_r) / (ramp - full_r)          # acercándose
     if d >= -full_r:
-        return 1.0
-    return max(0.0, 1.0 + (d + full_r) / full_r)
+        return 1.0                                            # en el inflado
+    return 1.0 - (-d - full_r) / (exit_ramp - full_r)         # ya rebasada
 
 
 def _pass_side_cx(row_mask: np.ndarray, safe_row_mask: np.ndarray, ox: float, color: str) -> int | None:
@@ -124,23 +132,31 @@ def _pass_side_cx(row_mask: np.ndarray, safe_row_mask: np.ndarray, ox: float, co
     iox = max(0, min(iox, row_mask.shape[0] - 1))
     pref_min = max(1, C.CENTERLINE_MIN_WIDTH // 2)
 
+    # Clamp del punto de paso: _widest_free_segment elige por ANCHO, así que
+    # cuando el cono está cerca y pegado a un lado, agarra el sliver de piso
+    # pegado a la pared (x lejísimos) en vez del hueco chico justo afuera del
+    # cono -> el path se curla a la pared y el carro sobre-gira. Se limita el
+    # offset lateral respecto al cono a "radio bloqueado + medio carril".
+    off_max = C.OBS_INFLATE_R + getattr(C, "PASS_LANE_MARGIN_PX", 30)
+
+    # Si NO se encuentra hueco libre del lado de paso (la lata cerca "unta" su
+    # color sobre el BEV / oclusión), se COMPROMETE igual al borde del inflado
+    # del lado correcto: físicamente SIEMPRE hay paso por el lado obligado WRO
+    # (la lata está dentro del corredor). NUNCA devolver un punto del lado
+    # contrario solo porque ahí sí se vio piso.
     if color == "Red":
         cx_rel = _widest_free_segment(safe_row_mask[iox:], pref_min)
         if cx_rel is None:
-            cx_rel = _widest_free_segment(row_mask[iox:], pref_min)  # fallback sin margen
-        # Último recurso si ni siquiera row_mask (sin margen) tiene un hueco
-        # ancho: usar OBS_INFLATE_R (radio YA bloqueado alrededor del
-        # obstáculo, físico+seguridad), NUNCA OBS_PHYSICAL_R_PX -- ese es
-        # solo el radio físico de la lata, más chico que lo que free_mask ya
-        # bloqueó, así que ese punto caía DENTRO de la propia zona bloqueada
-        # (el path terminaba apuntando a la lata en vez de esquivarla).
-        return (iox + cx_rel) if cx_rel is not None else iox + C.OBS_INFLATE_R
+            cx_rel = _widest_free_segment(row_mask[iox:], pref_min)  # sin margen
+        cx = (iox + cx_rel) if cx_rel is not None else iox + C.OBS_INFLATE_R
+        return int(max(iox + C.OBS_INFLATE_R, min(cx, iox + off_max)))
 
     if color == "Green":
         cx_abs = _widest_free_segment(safe_row_mask[:iox], pref_min)
         if cx_abs is None:
             cx_abs = _widest_free_segment(row_mask[:iox], pref_min)
-        return cx_abs if cx_abs is not None else iox - C.OBS_INFLATE_R
+        cx = cx_abs if cx_abs is not None else iox - C.OBS_INFLATE_R
+        return int(min(iox - C.OBS_INFLATE_R, max(cx, iox - off_max)))
 
     return None
 
@@ -214,6 +230,45 @@ def _limit_lateral_step(points: list[tuple[float, int]], weights: list[float] | 
             x = prev_x - max_dx
         out.append((x, y))
         prev_x = x
+    return out
+
+
+def _clamp_to_pass_side(
+    points: list[tuple[float, int]],
+    bev_obstacles: list[tuple[float, float, str]],
+    obstacle_conf: list[float] | None,
+    w_img: int,
+) -> list[tuple[float, int]]:
+    """
+    Garantía FINAL de lado, SOLO en las filas que el círculo de inflado de una
+    lata bloquea de verdad (|y - oy| <= INFLATE_R): el punto del path se empuja
+    justo afuera del borde del círculo, del lado WRO correcto (Rojo -> derecha,
+    Verde -> izquierda). Corre DESPUÉS de todo el post-proceso -> sobrescribe
+    cualquier jalón de _smooth_x / _enforce_free_mask al lado contrario.
+
+    NO toca las filas de aproximación (lata lejos, fuera del círculo): ahí el
+    blend por rampa mueve el path de lado GRADUALMENTE. Antes se clampaba toda
+    fila con peso>0 a la banda estrecha de paso -> el path se jalaba a la
+    izquierda ~200px antes de la lata -> volantazo temprano del verde.
+    """
+    if not bev_obstacles:
+        return points
+    R = float(C.OBS_INFLATE_R)
+    margin = 2.0
+    out: list[tuple[float, int]] = []
+    for x, y in points:
+        for idx, (ox, oy, color) in enumerate(bev_obstacles):
+            if color not in ("Red", "Green"):
+                continue
+            dy = abs(float(y) - float(oy))
+            if dy > R:
+                continue
+            half = math.sqrt(max(0.0, R * R - dy * dy))   # medio-ancho del círculo a esta fila
+            if color == "Red":
+                x = max(x, ox + half + margin)            # a la derecha del borde
+            else:
+                x = min(x, ox - half - margin)            # a la izquierda del borde
+        out.append((float(np.clip(x, 0.0, w_img - 1.0)), y))
     return out
 
 
@@ -303,6 +358,7 @@ def detect_centerline(
     bev_obstacles: list[tuple[float, float, str]],
     bev_hsv: np.ndarray | None = None,
     obstacle_conf: list[float] | None = None,
+    stats_out: dict | None = None,
 ) -> list[tuple[int, int]]:
     """
     Detecta la línea central del corredor en la imagen BEV.
@@ -320,6 +376,15 @@ def detect_centerline(
                      OrangeLineTracker.update() para no convertir la misma
                      imagen BGR->HSV dos veces por frame). Si no se pasa, se
                      calcula aquí como antes.
+      stats_out    : si se pasa un dict, se rellena con señales internas del
+                     frame para el caller. Hoy: stats_out["weights"] = lista de
+                     pesos por fila (0..1) alineada 1:1 con la lista de puntos
+                     devuelta (índice 0 = fila más cercana al eje del robot).
+                     OJO: el peso es de esquiva de LATA solo cuando hay una
+                     Red/Green en bev_obstacles; sin latas, las filas sin piso
+                     (pared de frente) también meten 1.0 aquí. El caller debe
+                     ignorar weights si no hay lata de color en la lista
+                     (ver runtime_nuevo._measured_recup_trigger).
       obstacle_conf: confianza (0..1) de cada obstáculo, MISMO orden/largo que
                      bev_obstacles (ver ObstacleMemory.last_confidences) --
                      atenúa qué tan fuerte se compromete el path al lado de
@@ -424,6 +489,7 @@ def detect_centerline(
     # ── 3. Muestreo fila a fila ────────────────────────────────────────────
     points: list[tuple[float, int]] = []
     weights: list[float] = []
+    _dbg_rows: list = []
     # Historial de bordes (y, izq, der) del hueco safe_mask en filas con dato
     # real -- permite, cuando una fila más adelante se queda sin piso, AJUSTAR
     # la tendencia del borde que se está cerrando y proyectarla hacia
@@ -594,10 +660,22 @@ def detect_centerline(
 
         points.append((float(np.clip(cx, 0, w - 1)), y))
         weights.append(best_w)
+        if getattr(C, "CENTERLINE_DEBUG", False) and best_w > 0.05:
+            _branch = ("free" if (pass_cx is None or best_w <= 0.0)
+                       else ("passonly" if free_cx is None else "blend"))
+            _dbg_rows.append([y, _branch,
+                              None if free_cx is None else int(free_cx),
+                              None if pass_cx is None else int(pass_cx),
+                              round(best_w, 2),
+                              None if best_ox is None else int(best_ox),
+                              round(float(np.clip(cx, 0, w - 1)), 1)])
 
     if points:
+        _dbg_raw = {int(yy): xx for xx, yy in points}
         points = _limit_lateral_step(points, weights)
+        _dbg_lim = {int(yy): xx for xx, yy in points}
         points = _smooth_x(points, weights)
+        _dbg_smo = {int(yy): xx for xx, yy in points}
         # Red de seguridad FINAL: cada fila ya se verificó individualmente
         # contra el círculo bloqueado del obstáculo antes de esto, pero
         # _smooth_x() promedia con las filas vecinas sin saber nada de
@@ -607,6 +685,29 @@ def detect_centerline(
         # real (confirmado con pruebas: sin esto había puntos invadiendo la
         # zona de seguridad incluso con confianza plena).
         points = _enforce_free_mask(points, free_mask, w)
+        # Garantía de LADO (corre al final, sobrescribe jalones de _smooth_x /
+        # _enforce_free_mask al lado contrario del obstáculo).
+        points = _clamp_to_pass_side(points, bev_obstacles, obstacle_conf, w)
+        if getattr(C, "CENTERLINE_DEBUG", False) and _dbg_rows:
+            _dbg_enf = {int(yy): xx for xx, yy in points}
+            for r in _dbg_rows:
+                y = r[0]
+                raw, lim, smo, enf = (_dbg_raw.get(y), _dbg_lim.get(y),
+                                      _dbg_smo.get(y), _dbg_enf.get(y))
+                def _f(v):
+                    return "  -  " if v is None else f"{v:5.0f}"
+                print(f"[CLDBG] y={y:3d} {r[1]:8s} free={_f(r[2])} pass={_f(r[3])} "
+                      f"w={r[4]:.2f} ox={_f(r[5])} | raw={_f(raw)} lim={_f(lim)} "
+                      f"smo={_f(smo)} enf={_f(enf)}"
+                      + ("  <<< SALTO" if (raw is not None and enf is not None
+                                          and abs(raw - enf) > 18) else ""),
+                      flush=True)
+
+    if stats_out is not None:
+        # weights se llena 1:1 con points en cada rama del muestreo fila-a-fila y
+        # el post-proceso (_limit_lateral_step/_smooth_x/_enforce_free_mask/
+        # _clamp_to_pass_side) preserva largo y orden -> alineado con el return.
+        stats_out["weights"] = list(weights)
 
     return [(int(round(np.clip(x, 0, w - 1))), int(y)) for x, y in points]
 
