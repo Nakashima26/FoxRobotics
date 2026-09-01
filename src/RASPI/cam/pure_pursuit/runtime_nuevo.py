@@ -101,6 +101,16 @@ def _parse_estado(ack: str) -> str | None:
     val = ack[idx + 4: idx + 5]
     return val if val in ("G", "R", "S") else None
 
+def _parse_direccion(ack: str) -> str | None:
+    """dir= del ACK:V2 del ESP32: 'L'/'R' desde su 1er GIRANDO, '?' antes."""
+    if not ack:
+        return None
+    idx = ack.find("dir=")
+    if idx < 0:
+        return None
+    val = ack[idx + 4: idx + 5]
+    return val if val in ("L", "R") else None
+
 
 class PPRuntime:
     """
@@ -128,6 +138,21 @@ class PPRuntime:
         self._turn_start_t: float | None = None
         self._turn_recovery_frames: int = 0
         self._pasado_hold: int = 0   # frames restantes repitiendo pasado=1
+        self._pasado_from_measured: bool = False  # el pulso pasado en curso vino
+                                                  # de _measured_recup_trigger
+                                                  # (esquiva de ángulo REAL) — no
+                                                  # se suprime cerca de la esquina
+        self._turn_delay_frames: int = 0  # tras un rebase medido cerca de una
+                                          # esquina: fuerza prio=1 estos frames
+                                          # (post-RECUPERANDO) para que el giro
+                                          # no entre ~0.5s antes del punto real
+        self._ext_corner_hold: bool = False   # este frame se rescató un cono
+                                              # EXTERIOR de la boca de la esquina
+                                              # (ver CORNER_EXTERIOR_PASS_ENABLED)
+        self._ext_corner_block: int = 0       # frames restantes forzando prio=1
+                                              # tras soltar el rescate (el giro no
+                                              # se suelta hasta que el cono está
+                                              # de verdad atrás, no por arrastre)
 
         # ── Trigger de RECUPERANDO por ESTADO MEDIDO (ver _measured_recup_trigger) ──
         self._heading_ref: float | None = None   # heading de la recta al ARMARSE la esquiva
@@ -164,10 +189,16 @@ class PPRuntime:
     # ── Serial ────────────────────────────────────────────────────────────────
 
     def _build_serial_message(self, obs_norm: float, state: str, n_mem_obs: int,
-                               pasado: bool, interior: bool) -> str:
-        has_obstacle = n_mem_obs > 0   # basado en memoria real, no en steer
+                               pasado: bool, interior: bool,
+                               turn_block: bool = False) -> str:
+        # turn_block: se acaba de pasar un cono exterior de esquina y todavía
+        # NO se quiere soltar el giro (el cono podría estar al lado por
+        # arrastre de memoria). Fuerza prio/mem para que el ESP32 mantenga
+        # bloqueado detectarEsquina() unos frames más.
+        has_obstacle = (n_mem_obs > 0) or turn_block
+        mem_out = max(n_mem_obs, 1) if turn_block else n_mem_obs
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
-                f"state={state},prio={int(has_obstacle)},mem={n_mem_obs},pp=1,"
+                f"state={state},prio={int(has_obstacle)},mem={mem_out},pp=1,"
                 f"pasado={int(pasado)},intr={int(interior)}")
 
     # ── Trigger de RECUPERANDO por ESTADO MEDIDO ──────────────────────────────
@@ -488,6 +519,15 @@ class PPRuntime:
                     ready_ack = "ACK:READY" in (self.serial_link.try_readline() or "")
                     armed = True
                     self._last_update_t = None   # dt limpio para el 1er frame armado
+                    # La dirección de giro se infiere SOLO durante la corrida:
+                    # descartar cualquier latch del rato desarmado (el carro
+                    # pudo estar apuntando a una naranja que no es la del 1er
+                    # giro de la carrera).
+                    self.turn_dir_tracker.reset()
+                    self._ext_corner_block = 0
+                    self._pasado_hold = 0
+                    self._pasado_from_measured = False
+                    self._turn_delay_frames = 0
                     if on_ready is not None:
                         on_ready()
                     print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
@@ -537,6 +577,7 @@ class PPRuntime:
                 line_info     = {"Orange": {"seen": False, "near_y": None}}
                 bev_obstacles_beyond = []
                 interior      = False
+                self._ext_corner_hold = False
                 bev_timing    = {"warp": 0.0, "proj": 0.0, "mem": 0.0, "line": 0.0, "dc": 0.0, "ctrl": 0.0}
 
                 if self.bev.is_calibrated:
@@ -632,6 +673,38 @@ class PPRuntime:
                         bev_obstacles_beyond = []
                         orange_info = line_info["Orange"]
                         if orange_info["seen"] and not en_recuperacion_giro:
+                            # ── Rescate de cono EXTERIOR pegado a la boca de la
+                            # esquina: si la pista va a girar y el cono de la
+                            # boca se pasa por el lado CONTRARIO al giro, hay
+                            # que rodearlo ANTES de girar -> se trata como "mío"
+                            # aunque caiga "más allá" de la naranja. Ver
+                            # CORNER_EXTERIOR_PASS_ENABLED en config.py.
+                            # turn_dir: override de config si está fijo (el
+                            # equipo sabe la dirección al montar la pista), si
+                            # no, la latcheada del tracker de visión (ya fija
+                            # para cuando se llega a una esquina).
+                            _turn_dir_eff = (getattr(C, "CORNER_TURN_DIR_OVERRIDE", None)
+                                             or self.turn_dir_tracker.direction)
+                            _oy_line = orange_info.get("near_y")
+                            _corner_imminent = (
+                                _oy_line is not None
+                                and _oy_line >= getattr(C, "CORNER_EXT_PASS_NEAR_ORANGE_Y", 285.0))
+                            _rescue_fn = None
+                            if (getattr(C, "CORNER_EXTERIOR_PASS_ENABLED", False)
+                                    and _corner_imminent and _turn_dir_eff is not None):
+                                _band = float(getattr(C, "CORNER_EXT_PASS_BAND_PX", 70.0))
+                                def _rescue_fn(ox, oy, color, _td=_turn_dir_eff,
+                                               _nyl=_oy_line, _b=_band):
+                                    # Exterior = el lado de paso WRO NO coincide
+                                    # con el giro. Y solo en la boca de la
+                                    # esquina (no metido en la recta siguiente).
+                                    if is_interior_pass(_td, color):
+                                        return False
+                                    if oy < _nyl - _b:
+                                        return False
+                                    self._ext_corner_hold = True
+                                    return True
+
                             # Clasificación PEGAJOSA por objeto (ver
                             # ObstacleMemory.classify_and_split()) -- una vez
                             # que un objeto se clasifica "mío" o "más allá",
@@ -647,16 +720,25 @@ class PPRuntime:
                                 self.memory.classify_and_split(
                                     lambda ox, oy: self.line_tracker.classify(
                                         ox, oy, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
-                                    )
+                                    ),
+                                    rescue_fn=_rescue_fn,
                                 )
                             )
 
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
-                        # persistencia, ver TurnDirectionTracker) de la posición
-                        # lateral de un obstáculo visto más allá de la naranja,
-                        # y se queda fija toda la carrera.
+                        # persistencia, ver TurnDirectionTracker) y se queda fija
+                        # toda la carrera. PRIMARIA: posición lateral de un
+                        # obstáculo "beyond". La pendiente (line/near_y) es solo
+                        # confirmación opcional (apagada por defecto). Solo
+                        # infiere DURANTE la corrida (armado): desarmado el
+                        # pipeline corre pero el carro no se mueve.
                         turn_dir = self.turn_dir_tracker.update(
-                            bev_obstacles_beyond, C.ROBOT_BEV_X
+                            bev_obstacles_beyond if armed else [],
+                            C.ROBOT_BEV_X,
+                            line=(orange_info.get("line")
+                                  if (armed and not en_recuperacion_giro) else None),
+                            near_y=(orange_info.get("near_y")
+                                    if (armed and not en_recuperacion_giro) else None),
                         )
 
                         # ── Interior/exterior del obstáculo actual (el más
@@ -675,10 +757,11 @@ class PPRuntime:
                         # ── DEBUG clasificación mine/beyond + turn-dir ──
                         # (solo cuando hay algo "beyond" -> el caso que fijó mal
                         # la dirección; ver TurnDirectionTracker).
-                        if bev_obstacles_beyond:
+                        if bev_obstacles_beyond or self._ext_corner_hold:
                             print(f"[CLASS] mia={[(round(x),round(y),c) for x,y,c in bev_obstacles]} "
                                   f"beyond={[(round(x),round(y),c) for x,y,c in bev_obstacles_beyond]} "
                                   f"turn_dir={turn_dir} interior={interior} "
+                                  f"exthold={int(self._ext_corner_hold)} "
                                   f"orange_near_y={orange_info.get('near_y')}", flush=True)
                         _t4 = time.perf_counter()
                         bev_timing["line"] = (_t4 - _t3) * 1000.0
@@ -714,12 +797,26 @@ class PPRuntime:
                             if measured_pass:
                                 self._pasado_hold = max(self._pasado_hold,
                                                         C.PASADO_HOLD_FRAMES)
+                                self._pasado_from_measured = True
                                 # Olvida el cono YA: la centerline del PRÓXIMO
                                 # frame deja de rodearlo -> el carro sale del
                                 # arco en vez de seguir clavando el volante
                                 # (comportamiento del modo "angle" viejo, que
                                 # era lo que mantenía la esquiva fluida).
                                 self.memory.forget_color_obstacles()
+                                # Si el rebase medido fue CERCA de una esquina,
+                                # retrasar el giro: tras RECUPERANDO el ESP32
+                                # disparaba detectarEsquina() ~0.5s antes del
+                                # punto real (reporte del usuario, orillas429).
+                                # _turn_delay_frames fuerza prio=1 (giro
+                                # bloqueado) esos frames, DESPUÉS de que
+                                # RECUPERANDO termina, para que el carro avance
+                                # recto hasta el punto correcto.
+                                _ny_m = orange_info.get("near_y")
+                                if (_ny_m is not None and _ny_m >=
+                                        getattr(C, "RECUP_SUPPRESS_NEAR_ORANGE_Y", 285.0)):
+                                    self._turn_delay_frames = getattr(
+                                        C, "RECUP_CORNER_TURN_DELAY_FRAMES", 8)
 
                         if len(path_points) >= C.MIN_PATH_PTS:
                             # Lookahead ADAPTATIVO: se acorta (~45 px) cuando hay
@@ -752,6 +849,19 @@ class PPRuntime:
                                 # Hay un obstáculo BEV real activo → el hint no
                                 # debe competir con la esquiva geométrica precisa.
                                 self.far_hint.reset_all()
+
+                        # ── Cono EXTERIOR de esquina: ir "completamente
+                        # vertical". La centerline, con la esquina abierta
+                        # adelante, puede curvar hacia ella y PP la seguiría ->
+                        # el carro arquearía hacia el giro antes de rebasar el
+                        # cono. Capar el steer mantiene el rumbo recto; la
+                        # esquiva de un cono YA exterior es suave y cabe dentro
+                        # del cap. 0 = sin cap.
+                        if self._ext_corner_hold and pp_active:
+                            _cap = float(getattr(C, "CORNER_EXT_PASS_MAX_STEER_DEG", 0.0))
+                            if _cap > 0.0:
+                                steer_deg = max(-_cap, min(_cap, steer_deg))
+
                         if pp_active:
                             obs_norm = self.controller.normalize(steer_deg)
                         bev_timing["ctrl"] = (time.perf_counter() - _t5) * 1000.0
@@ -773,18 +883,34 @@ class PPRuntime:
                 # (near_y grande), el ESP32 está por girar. Un pasado=1 aquí lo
                 # mete a RECUPERANDO -> en ese estado NO evalúa detectarEsquina()
                 # -> el giro entra ~0.5s tarde y el carro se lleva el cono de la
-                # recta siguiente (orillas420/421). El giro mismo endereza; no
-                # hace falta RECUPERANDO ciego encima.
+                # recta siguiente (orillas420/421).
+                # EXCEPCIÓN 2026-08-31 (RECUP_SUPPRESS_KEEP_MEASURED): si el
+                # pulso vino del trigger MEDIDO (esquiva de ÁNGULO real, cono
+                # rojo/verde en la misma recta cerca de la esquina), el chasis
+                # quedó chueco y SÍ hace falta RECUPERANDO -> sin él, el carro
+                # ladeado dispara un FALSO detectarEsquina() (ultrasónico lateral
+                # lee "sin pared" por el yaw) y gira ~90° encima del ladeo
+                # (reporte del usuario). Solo se suprime el pasado ESPURIO
+                # (memory.last_passed / BEHIND_PAD head-on, sin esquiva de
+                # ángulo), que era el caso de orillas420/421.
                 _oy = line_info["Orange"].get("near_y")
                 _corner_soon = (line_info["Orange"].get("seen")
                                 and _oy is not None
                                 and _oy >= getattr(C, "RECUP_SUPPRESS_NEAR_ORANGE_Y", 300.0))
-                if _corner_soon and self._pasado_hold > 0:
+                _keep_measured = (self._pasado_from_measured
+                                  and getattr(C, "RECUP_SUPPRESS_KEEP_MEASURED", True))
+                if _corner_soon and self._pasado_hold > 0 and not _keep_measured:
                     self._pasado_hold = 0
+                    self._pasado_from_measured = False
                     self._last_recup_reason = f"pasado suprimido (esquina, oy={_oy:.0f})"
+                elif _corner_soon and _keep_measured and self._pasado_hold > 0:
+                    self._last_recup_reason = (
+                        f"pasado(medido) NO suprimido cerca esquina (oy={_oy:.0f})")
                 pasado = self._pasado_hold > 0
                 if self._pasado_hold > 0:
                     self._pasado_hold -= 1
+                    if self._pasado_hold == 0:
+                        self._pasado_from_measured = False
 
                 # Sin línea válida → recto (obs=0).
                 state = "pp_follow" if pp_active else "no_path"
@@ -793,8 +919,34 @@ class PPRuntime:
                 timing_ms["bev"] = (t_bev - t_vis) * 1000.0
 
                 # ── Construir y (si armado) enviar mensaje serial ────────────
+                # ── Bloqueo de giro post-rescate de cono exterior ────────────
+                # Mientras se rescata (exthold) se refresca el contador; al
+                # soltarse, se mantiene prio=1 CORNER_EXT_PASS_TURN_BLOCK_FRAMES
+                # frames más -> el ESP32 no gira hasta que el cono está de
+                # verdad atrás, no por el arrastre de memoria que lo poda como
+                # "PASADO" antes de tiempo.
+                if self._ext_corner_hold:
+                    self._ext_corner_block = getattr(
+                        C, "CORNER_EXT_PASS_TURN_BLOCK_FRAMES", 10)
+                elif self._ext_corner_block > 0:
+                    self._ext_corner_block -= 1
+
+                # ── Retraso de giro post-RECUPERANDO cerca de esquina ────────
+                # Solo consume el contador cuando RECUPERANDO YA terminó (no
+                # `pasado` ni est=R) — forzar prio=1 durante RECUPERANDO lo
+                # abortaría (el ESP32 sale a SIGUIENDO con piPriority). Una vez
+                # enderezado, prio=1 estos frames bloquea detectarEsquina() ->
+                # el carro avanza recto hasta el punto real del giro.
+                _turn_hold = False
+                if (self._turn_delay_frames > 0
+                        and not pasado and self._prev_estado != "R"):
+                    self._turn_delay_frames -= 1
+                    _turn_hold = True
+                _turn_block = (self._ext_corner_block > 0) or _turn_hold
+
                 serial_msg = self._build_serial_message(
-                    obs_norm, state, len(bev_obstacles), pasado, interior
+                    obs_norm, state, len(bev_obstacles), pasado, interior,
+                    turn_block=_turn_block,
                 )
                 if armed:
                     self.serial_link.send_line(serial_msg)
@@ -805,6 +957,13 @@ class PPRuntime:
                 heading = _parse_heading(serial_ack)
                 if heading is not None:
                     self._last_heading = heading
+
+                # Dirección de giro AUTORITATIVA del ESP32 (dir= en el ACK, L/R
+                # desde su 1er GIRANDO). Cubre esquinas 2-12; corrige cualquier
+                # estimación de visión.
+                _esp_dir = _parse_direccion(serial_ack)
+                if _esp_dir is not None:
+                    self.turn_dir_tracker.set_esp_direction(_esp_dir)
 
                 estado_now = _parse_estado(serial_ack)
                 if estado_now is not None:
@@ -861,7 +1020,14 @@ class PPRuntime:
                 print(log_line, flush=True)
 
                 print(f"[LINEA] Orange={line_info['Orange']}", flush=True)
-                print(f"[DIR] fija={self.turn_dir_tracker.direction} interior={interior}", flush=True)
+                _ln = line_info["Orange"].get("line")
+                _vy = None if _ln is None else round(float(_ln[1]))
+                print(f"[DIR] fija={self.turn_dir_tracker.direction} "
+                      f"ovr={getattr(C, 'CORNER_TURN_DIR_OVERRIDE', None)} "
+                      f"vy={_vy} interior={interior} "
+                      f"ext_corner_hold={int(self._ext_corner_hold)} "
+                      f"turn_block={self._ext_corner_block} "
+                      f"turn_delay={self._turn_delay_frames}", flush=True)
                 # Vuelca el estado interno de la memoria rodante a stdout (antes
                 # solo iba al HUD de pantalla vía _annotate). Permite medir en
                 # journalctl cuántos frames se arrastra un obstáculo (falta=+Npx

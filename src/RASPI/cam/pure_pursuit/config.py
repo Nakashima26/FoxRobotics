@@ -381,6 +381,26 @@ PASADO_HOLD_FRAMES        = 6
 # siguiente (orillas420/421). El giro mismo endereza el heading.
 RECUP_SUPPRESS_NEAR_ORANGE_Y = 285.0
 
+# ...PERO NO suprimir si el pasado vino del trigger MEDIDO (esquiva de ÁNGULO
+# real — cono rojo/verde en la MISMA recta, cerca de la esquina). Ahí el chasis
+# quedó chueco y RECUPERANDO SÍ hace falta: sin él, el carro ladeado dispara un
+# FALSO detectarEsquina() (ultrasónico lateral lee "sin pared" por el yaw) y
+# gira ~90° encima del ladeo (reporte del usuario 2026-08-31: "esquiva rojo en
+# la recta, tenía que entrar recuperando, en cambio entró a girando"). La
+# supresión sigue matando el pasado ESPURIO (memory.last_passed / BEHIND_PAD
+# head-on, sin esquiva de ángulo), que era el caso de orillas420/421.
+# False = supresión ciega de siempre (revertir si esto retrasa el giro y se
+# lleva el cono de la recta siguiente).
+RECUP_SUPPRESS_KEEP_MEASURED = True
+
+# Tras un rebase MEDIDO cerca de una esquina (RECUP_SUPPRESS_KEEP_MEASURED):
+# una vez que RECUPERANDO terminó de enderezar, forzar prio=1 (giro bloqueado)
+# estos frames más antes de soltar el giro. Sin esto el ESP32 disparaba
+# detectarEsquina() ~0.5s ANTES del punto real (reporte del usuario,
+# orillas429: "el giro se activó mucho antes, le faltó medio segundo").
+# ~3 frames @ ~15fps ~= 0.2s. Subir si el giro sigue entrando temprano.
+RECUP_CORNER_TURN_DELAY_FRAMES = 3
+
 # est=G debounce: frames CONSECUTIVOS de est=G en el ACK del ESP32 antes de dar
 # el giro por real y borrar/apagar la memoria de obstáculos. Un est=G espurio
 # (ACK con ruido, "est=G fantasma tras verde") ya NO dispara el wipe de memoria
@@ -509,11 +529,36 @@ LINE_FIT_MIN_POINTS  = 35   # 2026-08-29: 70 -> 35. Con 70, la línea naranja re
                              # y el carro lo esquivaba (orillas420, reporte del usuario).
                              # 35 permite estimar la pendiente desde los primeros frames;
                              # el EMA de _smooth_line (line_ema=0.35) amortigua el ruido.
-LINE_FIT_MAX_SLOPE_DEG = 45  # 2026-08-29: 30 -> 45. Al acercarse a la esquina en ángulo,
+LINE_FIT_MAX_SLOPE_DEG = 72  # 2026-08-29: 30 -> 45. Al acercarse a la esquina en ángulo,
                              # o esquivando (chasis ladeado ~20°), la línea SÍ se ve
                              # diagonal en el BEV -> descartar >30° forzaba el horizontal
                              # equivocado. 45° deja pasar la inclinación real sin colar
                              # una vertical de ruido.
+                             # 2026-08-31: 45 -> 72. La MISMA línea de esquina se ve a
+                             # ~30° en un sentido de vuelta y a ~60° en el otro (el
+                             # ángulo con que la cruza el chasis cambia con la
+                             # dirección) -> con 45 en medio, un sentido ajustaba bien
+                             # y el otro caía SIEMPRE al fallback horizontal
+                             # (clasificación mala, el giro no se armaba -- reporte del
+                             # usuario). 72 acepta los ~60° reales; una vertical de
+                             # ruido (>72°, columna de píxeles / borde de cono) sigue
+                             # fuera. DIST_HUBER + MIN_POINTS + EMA + PERSIST_FRAMES
+                             # filtran un ajuste malo de un frame suelto.
+
+# ─── Dirección de giro — TurnDirectionTracker ───────────────────────────────
+# PRIMARIA: posición lateral de un obstáculo "beyond" (ver corner_lines.py).
+#
+# La PENDIENTE de la naranja se probó como primaria (2026-08-31) y FALLÓ: el
+# `vy` (=line[1]) sigue a la DISTANCIA a la línea, no al sentido de giro —
+# distorsión del BEV en campo lejano. En una sola aproximación al 1er giro:
+#   near_y=173 (lejos) vy=+170  |  near_y=291 (cerca) vy=-5  |  near_y=318 vy=+126
+# Latcheó "L" con la pista girando a la DERECHA. Queda como CONFIRMACIÓN
+# opcional, apagada por defecto: si se enciende, solo se lee con la línea
+# cerca (near_y >= LINE_DIR_MIN_NEAR_Y) y solo puede VETAR al obstáculo
+# (conflicto -> no vota), nunca fijar sola.
+LINE_DIR_FROM_SLOPE_ENABLED = False
+LINE_DIR_MIN_NEAR_Y    = 285.0   # solo mirar la pendiente con la línea a <=~190mm
+LINE_DIR_SLOPE_DEADBAND = 20.0   # |vy| por debajo de esto = no opina
 
 # ─── Suavizado temporal de la línea naranja — ver OrangeLineTracker ───────────
 LINE_MASK_CLOSE_KERNEL    = (5, 3)  # cierre morfológico (ancho, alto) sobre la máscara
@@ -578,6 +623,64 @@ PP_STEER_GAIN     = MAX_STEER_DEG   # 60.0
 # False = intr SIEMPRE 0 = garantía dura restaurada. Volver a True solo cuando
 # el turn-dir esté confiable Y el ESP32 tenga el gate de alineación.
 INTERIOR_PASS_ENABLED = False
+
+# ─── Obstáculo EXTERIOR pegado a la boca de la esquina ───────────────────────
+# Caso (reporte del usuario, HUD orillas424): la pista va a girar (naranja
+# cerca) y justo en la boca de la esquina hay un cono cuyo lado de paso WRO es
+# el CONTRARIO al giro -> verde con giro a la DERECHA, o rojo con giro a la
+# IZQUIERDA (o sea, NOT is_interior_pass). Ahí no se puede girar todavía: hay
+# que pasar el cono COMPLETO por el lado correcto (el exterior del giro), yendo
+# recto, y solo cuando ya quedó atrás soltar el giro.
+#
+# Sin esto, classify_and_split() lo manda a "beyond" (está al otro lado de la
+# naranja) -> desaparece del plan -> prio=0/mem=0 -> el ESP32 ve vía libre y
+# gira CONTRA el cono.
+#
+# Fix (solo Pi, NO toca PurePursuit.ino): mientras se cumpla el caso, ese cono
+# se RESCATA de "beyond" y se trata como "mío":
+#   (a) sigue en bev_obstacles -> la centerline lo esquiva por el lado WRO
+#       correcto (_clamp_to_pass_side: verde->izquierda, rojo->derecha),
+#   (b) prio=1/mem>0 -> el ESP32 mantiene bloqueado detectarEsquina().
+# Cuando el cono cruza el eje, _prune lo tira; como la naranja está cerca,
+# RECUP_SUPPRESS_NEAR_ORANGE_Y ya anula el pulso `pasado` -> el ESP32 pasa
+# directo a GIRANDO. NO es el intento viejo de "interior pass" (ese soltaba el
+# giro ANTES via intr=1; esto lo RETIENE). No se toca intr ni el .ino.
+CORNER_EXTERIOR_PASS_ENABLED = True
+
+# Dirección de giro de la pista para ESTE campeonato. El equipo la sabe al
+# montar la pista. Si se fija ("L" o "R"), se usa para decidir interior/exterior
+# en vez de la que infiere TurnDirectionTracker por visión — que en el intento
+# viejo de interior-pass se fijó MAL (rojo de arranque mal clasificado) y causó
+# el choque. None = usar el tracker de visión (comportamiento de siempre).
+CORNER_TURN_DIR_OVERRIDE = None   # None | "L" | "R"
+
+# El cono cuenta como "en la boca de la esquina" si la naranja está a near_y
+# >= esto. 2026-08-31: era RECUP_SUPPRESS_NEAR_ORANGE_Y (285) y en los frames
+# del usuario el verde se escapaba a "beyond" a near_y~281 (antes de llegar a
+# 285) -> se dejaba de esquivar a media aproximación -> reaparecía como
+# fantasma. 230 lo agarra apenas la naranja se ve estable, con pista por
+# delante, y no se suelta.
+CORNER_EXT_PASS_NEAR_ORANGE_Y = 230.0
+
+# ...y solo si el cono no está más de esto ADELANTE de la línea naranja (px
+# BEV; y decrece hacia adelante -> "no más allá de BAND" = oy >= near_y - BAND).
+# Un cono ya metido en la recta siguiente NO se rescata: lo resuelve esa recta
+# después de girar. Subir si el cono de esquina se ve más lejos de la línea.
+CORNER_EXT_PASS_BAND_PX = 70.0
+
+# Cap de |steer_deg| mientras se rescata el cono exterior. 2026-08-31: era 12
+# ("ir vertical"); el usuario pidió que ESQUIVE de verdad (como un cono
+# normal) porque ir recto lo rozaba. 25 deja arquear lo que pida la centerline
+# sin dar un volantazo. 0 = sin cap.
+CORNER_EXT_PASS_MAX_STEER_DEG = 25.0
+
+# Tras rescatar un cono exterior, cuántos frames más se mantiene prio=1 (giro
+# BLOQUEADO) DESPUÉS de que el cono desaparece de memoria. Arregla lo de los
+# frames del usuario: el fantasma del verde se poda como "PASADO" por arrastre
+# (y>345) cuando el carro NO lo pasó de verdad -> GIRANDO entraba y barría
+# hacia el cono. Con esto el giro no se suelta hasta ~10 frames (~0.7s ~=
+# 240mm de avance) después de que el cono se fue = genuinamente atrás.
+CORNER_EXT_PASS_TURN_BLOCK_FRAMES = 10
 
 # ─── PID de fallback (igual que wro_runtime.py) ───────────────────────────────
 RED_TARGET_PX    = 140
